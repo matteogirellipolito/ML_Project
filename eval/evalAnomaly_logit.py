@@ -10,13 +10,14 @@ from argparse import ArgumentParser
 from ood_metrics import fpr_at_95_tpr
 from sklearn.metrics import average_precision_score
 from torchvision.transforms import Compose, Resize, ToTensor
-import scipy.special
+from scipy.special import softmax
 
 seed = 42
 random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
 
+NUM_CHANNELS =3
 NUM_CLASSES = 20
 
 torch.backends.cudnn.deterministic = True
@@ -112,9 +113,9 @@ def main():
         maxlogit = -np.max(logits, axis=0)
 
         # MAX ENTROPY
-        probs = scipy.special.softmax(logits, axis=0)
-        entropy = -np.sum(probs * np.log(probs + 1e-10), axis=0)
-
+        probs = softmax(logits, axis=0)
+        entropy = np.sum(-probs * np.log(probs + 1e-9), axis=0)
+        
         anomaly_logit_list.append(maxlogit)
         anomaly_entropy_list.append(entropy)
 
@@ -126,10 +127,21 @@ def main():
         mask = target_transform(mask)
         ood_gts = np.array(mask)
 
-        #if 1 not in np.unique(ood_gts):
-        #    continue
+        ##riaggiunte come da originale
+        if "RoadAnomaly" in pathGT:
+            ood_gts = np.where((ood_gts==2), 1, ood_gts)
+        if "LostAndFound" in pathGT:
+            ood_gts = np.where((ood_gts==0), 255, ood_gts)
+            ood_gts = np.where((ood_gts==1), 0, ood_gts)
+            ood_gts = np.where((ood_gts>1)&(ood_gts<201), 1, ood_gts)
+        if "Streethazard" in pathGT:
+            ood_gts = np.where((ood_gts==14), 255, ood_gts)
+            ood_gts = np.where((ood_gts<20), 0, ood_gts)
+            ood_gts = np.where((ood_gts==255), 1, ood_gts)
+        ##
 
         ood_gts_list.append(ood_gts)
+
 
         # Heatmaps
         maxlogit_norm = normalize(maxlogit)
