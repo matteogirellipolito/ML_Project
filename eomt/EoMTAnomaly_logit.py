@@ -19,7 +19,6 @@ try:
 except ImportError:
     print("Assicurati di avere ood_metrics.py e scikit-learn installati.")
 
-# --- LOGICA DI CALCOLO ANOMALIA (Punto 5) ---
 
 def compute_anomaly_score(logits, masks, method='RbA', temp=1.0):
     """
@@ -54,7 +53,7 @@ def compute_anomaly_score(logits, masks, method='RbA', temp=1.0):
 def normalize(x):
     return (x - x.min()) / (x.max() - x.min() + 1e-10)
 
-# --- FUNZIONE METRICHE (Dal tuo Punto 4) ---
+# --- FUNZIONE METRICHE ---
 
 def compute_final_metrics(anomaly_scores, ood_gts, method_name):
     scores = np.array(anomaly_scores)
@@ -92,7 +91,7 @@ def main():
     model = LightningModule.load_from_checkpoint(args.ckpt).to(device)
     model.eval()
 
-    # 2. Trasformazioni (EoMT usa 640x640 per DINOv2)
+    # 2. Trasformazioni 
     input_transform = transforms.Compose([
         transforms.Resize((640, 640)),
         transforms.ToTensor(),
