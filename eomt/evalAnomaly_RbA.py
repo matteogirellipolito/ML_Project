@@ -17,11 +17,34 @@ seed_everything(0, verbose=False)
 # ==========================
 # CONFIG
 # ==========================
-device = 0
-img_idx = 0
+import argparse
 
-config_path = "configs/dinov2/coco/panoptic/eomt_giant_1280.yaml"
-data_path = "/content/dataset"
+parser = argparse.ArgumentParser()
+
+parser.add_argument(
+    "--config",
+    type=str,
+    required=True
+)
+
+parser.add_argument(
+    "--input",
+    type=str,
+    required=True
+)
+
+parser.add_argument(
+    "--device",
+    type=int,
+    default=0
+)
+
+args = parser.parse_args()
+
+device = args.device
+img_idx = 0
+config_path = args.config
+data_path = args.input
 
 # ==========================
 # LOAD CONFIG
