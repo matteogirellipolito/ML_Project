@@ -1,208 +1,212 @@
 import os
-import glob
 import yaml
 import torch
-import random
 import importlib
 import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 
-from PIL import Image
-from argparse import ArgumentParser
-from lightning import seed_everything
-from torchvision.transforms import Compose, Resize, ToTensor
-from scipy.special import softmax
 from torch.nn import functional as F
 from torch.amp.autocast_mode import autocast
-from sklearn.metrics import average_precision_score
+from lightning import seed_everything
+from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import RepositoryNotFoundError
 
-from ood_metrics import fpr_at_95_tpr
+seed_everything(0, verbose=False)
 
-seed_everything(42, verbose=False)
+# ==========================
+# CONFIG
+# ==========================
+device = 0
+img_idx = 0
 
-IGNORE_INDEX = 255
+config_path = "configs/dinov2/coco/panoptic/eomt_giant_1280.yaml"
+data_path = "/content/dataset"
 
-input_transform = Compose([
-    Resize((512, 1024), Image.BILINEAR),
-    ToTensor(),
-])
+# ==========================
+# LOAD CONFIG
+# ==========================
+with open(config_path, "r") as f:
+    config = yaml.safe_load(f)
 
-target_transform = Compose([
-    Resize((512, 1024), Image.NEAREST),
-])
+# ==========================
+# LOAD DATASET
+# ==========================
+data_module_name, class_name = config["data"]["class_path"].rsplit(".", 1)
+data_module = getattr(importlib.import_module(data_module_name), class_name)
 
-def normalize(x):
-    return (x - x.min()) / (x.max() - x.min() + 1e-10)
+data_module_kwargs = config["data"].get("init_args", {})
 
+data = data_module(
+    path=data_path,
+    batch_size=1,
+    num_workers=0,
+    check_empty_targets=False,
+    **data_module_kwargs
+)
 
-def compute_metrics(anomaly_scores, ood_gts):
+data.setup()
 
-    anomaly_scores = np.array(anomaly_scores)
-    ood_gts = np.array(ood_gts)
+# ==========================
+# LOAD ENCODER
+# ==========================
+encoder_cfg = config["model"]["init_args"]["network"]["init_args"]["encoder"]
+encoder_module_name, encoder_class_name = encoder_cfg["class_path"].rsplit(".", 1)
+encoder_cls = getattr(importlib.import_module(encoder_module_name), encoder_class_name)
 
-    ood_mask = (ood_gts == 1)
-    ind_mask = (ood_gts == 0)
+encoder = encoder_cls(
+    img_size=data.img_size,
+    **encoder_cfg.get("init_args", {})
+)
 
-    ood_out = anomaly_scores[ood_mask]
-    ind_out = anomaly_scores[ind_mask]
+# ==========================
+# LOAD NETWORK (EoMT)
+# ==========================
+network_cfg = config["model"]["init_args"]["network"]
+network_module_name, network_class_name = network_cfg["class_path"].rsplit(".", 1)
+network_cls = getattr(importlib.import_module(network_module_name), network_class_name)
 
-    ood_label = np.ones(len(ood_out))
-    ind_label = np.zeros(len(ind_out))
+network_kwargs = {
+    k: v for k, v in network_cfg["init_args"].items()
+    if k != "encoder"
+}
 
-    val_out = np.concatenate((ind_out, ood_out)).flatten()
-    val_label = np.concatenate((ind_label, ood_label)).flatten()
+network = network_cls(
+    masked_attn_enabled=False,
+    num_classes=data.num_classes,
+    encoder=encoder,
+    **network_kwargs
+)
 
-    prc_auc = average_precision_score(val_label, val_out)
-    fpr = fpr_at_95_tpr(val_out, val_label)
+# ==========================
+# LOAD LIGHTNING MODULE
+# ==========================
+lit_module_name, lit_class_name = config["model"]["class_path"].rsplit(".", 1)
+lit_cls = getattr(importlib.import_module(lit_module_name), lit_class_name)
 
-    print(f"AUPRC score: {prc_auc*100:.4f}")
-    print(f"FPR@TPR95: {fpr*100:.4f}")
+model_kwargs = {
+    k: v for k, v in config["model"]["init_args"].items()
+    if k != "network"
+}
 
+if "stuff_classes" in config["data"].get("init_args", {}):
+    model_kwargs["stuff_classes"] = config["data"]["init_args"]["stuff_classes"]
 
-def main():
+model = lit_cls(
+    img_size=data.img_size,
+    num_classes=data.num_classes,
+    network=network,
+    **model_kwargs
+).eval().to(device)
 
-    parser = ArgumentParser()
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--config", required=True)
-    args = parser.parse_args()
+# ==========================
+# LOAD PRETRAINED WEIGHTS
+# ==========================
+warnings.filterwarnings("ignore")
 
-    device = "cuda"
+name = config.get("trainer", {}).get("logger", {}).get("init_args", {}).get("name")
 
-    output_dir = "outputs_heatmaps"
-    os.makedirs(output_dir, exist_ok=True)
-
-    with open(args.config, "r") as f:
-        config = yaml.safe_load(f)
-
-    # Load encoder
-    encoder_cfg = config["model"]["init_args"]["network"]["init_args"]["encoder"]
-    encoder_module_name, encoder_class_name = encoder_cfg["class_path"].rsplit(".", 1)
-    encoder_cls = getattr(importlib.import_module(encoder_module_name), encoder_class_name)
-
-    encoder = encoder_cls(
-        img_size=(512, 1024),
-        **encoder_cfg.get("init_args", {})
+try:
+    state_dict_path = hf_hub_download(
+        repo_id=f"tue-mps/{name}",
+        filename="pytorch_model.bin",
     )
 
-    # Load network
-    network_cfg = config["model"]["init_args"]["network"]
-    network_module_name, network_class_name = network_cfg["class_path"].rsplit(".", 1)
-    network_cls = getattr(importlib.import_module(network_module_name), network_class_name)
-
-    network_kwargs = {
-        k: v for k, v in network_cfg["init_args"].items()
-        if k != "encoder"
-    }
-
-    network = network_cls(
-        masked_attn_enabled=False,
-        num_classes=19,
-        encoder=encoder,
-        **network_kwargs,
+    state_dict = torch.load(
+        state_dict_path,
+        map_location=f"cuda:{device}",
+        weights_only=True
     )
 
-    # Load lightning module
-    lit_module_name, lit_class_name = config["model"]["class_path"].rsplit(".", 1)
-    lit_cls = getattr(importlib.import_module(lit_module_name), lit_class_name)
+    model.load_state_dict(state_dict, strict=False)
 
-    model_kwargs = {
-        k: v for k, v in config["model"]["init_args"].items()
-        if k != "network"
-    }
+except RepositoryNotFoundError:
+    raise RuntimeError("Checkpoint non trovato.")
 
-    model = lit_cls(
-        img_size=(512, 1024),
-        num_classes=19,
-        network=network,
-        **model_kwargs,
-    ).eval().to(device)
+# ==========================
+# RbA SCORE
+# ==========================
+def compute_rba(mask_logits, class_logits):
+    class_probs = class_logits.softmax(dim=-1)[..., :-1]
+    uncertainty = 1.0 - class_probs.max(dim=-1)[0]
 
-    print("EoMT model loaded")
+    mask_probs = mask_logits.sigmoid()
 
-    anomaly_scores = []
-    ood_gts_list = []
+    rba = torch.einsum(
+        "bqhw,bq->bhw",
+        mask_probs,
+        uncertainty
+    )
 
-    for path in glob.glob(args.input):
+    return rba
 
-        print("Processing:", path)
+# ==========================
+# INFERENCE
+# ==========================
+def infer_rba(img):
+    with torch.no_grad(), autocast(dtype=torch.float16, device_type="cuda"):
 
-        image = Image.open(path).convert("RGB")
-        image_np = np.array(image)
+        imgs = [img.to(device)]
+        transformed = model.resize_and_pad_imgs_instance_panoptic(imgs)
 
-        tensor_img = input_transform(image).unsqueeze(0).to(device)
+        mask_logits_per_layer, class_logits_per_layer = model(transformed)
 
-        with torch.no_grad(), autocast(dtype=torch.float16, device_type="cuda"):
-
-            mask_logits_per_layer, class_logits_per_layer = model(tensor_img)
-
-            mask_logits = mask_logits_per_layer[-1]
-
-            # RbA score
-            probs = softmax(mask_logits.squeeze(0).cpu().numpy(), axis=0)
-
-            top2 = np.partition(probs, -2, axis=0)[-2:]
-            rba_score = top2[-1] - top2[-2]
-
-            anomaly_map = -rba_score
-
-        anomaly_scores.append(anomaly_map)
-
-        # Ground truth
-        pathGT = path.replace("images", "labels_masks")
-        pathGT = pathGT.replace("jpg", "png").replace("webp", "png")
-
-        mask = Image.open(pathGT)
-        mask = target_transform(mask)
-
-        ood_gts = np.array(mask)
-
-        if "RoadAnomaly" in pathGT:
-            ood_gts = np.where((ood_gts == 2), 1, ood_gts)
-
-        if "LostAndFound" in pathGT:
-            ood_gts = np.where((ood_gts == 0), 255, ood_gts)
-            ood_gts = np.where((ood_gts == 1), 0, ood_gts)
-            ood_gts = np.where((ood_gts > 1) & (ood_gts < 201), 1, ood_gts)
-
-        if "Streethazard" in pathGT:
-            ood_gts = np.where((ood_gts == 14), 255, ood_gts)
-            ood_gts = np.where((ood_gts < 20), 0, ood_gts)
-            ood_gts = np.where((ood_gts == 255), 1, ood_gts)
-
-        # filtro originale
-        if 1 not in np.unique(ood_gts):
-            continue
-
-        ood_gts_list.append(ood_gts)
-
-        # Heatmap
-        norm_map = normalize(anomaly_map)
-
-        plt.figure(figsize=(12,5))
-
-        plt.subplot(1,2,1)
-        plt.imshow(image_np)
-        plt.axis("off")
-        plt.title("Original")
-
-        plt.subplot(1,2,2)
-        plt.imshow(norm_map, cmap="jet")
-        plt.axis("off")
-        plt.title("RbA")
-
-        save_path = os.path.join(
-            output_dir,
-            os.path.basename(path).split(".")[0] + "_rba.png"
+        mask_logits = F.interpolate(
+            mask_logits_per_layer[-1],
+            model.img_size,
+            mode="bilinear"
         )
 
-        plt.savefig(save_path)
-        plt.close()
+        rba = compute_rba(
+            mask_logits,
+            class_logits_per_layer[-1]
+        )[0]
 
-    compute_metrics(anomaly_scores, np.array(ood_gts_list))
+        rba = F.interpolate(
+            rba[None, None],
+            img.shape[-2:],
+            mode="bilinear"
+        )[0, 0]
 
-    print(f"Heatmaps saved in {output_dir}")
+    return rba.cpu().numpy()
 
+# ==========================
+# HEATMAP
+# ==========================
+def plot_rba(img, rba):
+    img_np = img.permute(1,2,0).cpu().numpy()
 
-if __name__ == "__main__":
-    main()
+    plt.figure(figsize=(16,6))
+
+    plt.subplot(1,3,1)
+    plt.imshow(img_np)
+    plt.title("Input")
+    plt.axis("off")
+
+    plt.subplot(1,3,2)
+    plt.imshow(rba, cmap="hot")
+    plt.title("RbA Heatmap")
+    plt.axis("off")
+
+    plt.subplot(1,3,3)
+    plt.imshow(img_np)
+    plt.imshow(rba, cmap="hot", alpha=0.55)
+    plt.title("Overlay")
+    plt.axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
+# ==========================
+# RUN
+# ==========================
+img, target = data.val_dataloader().dataset[img_idx]
+
+rba = infer_rba(img)
+
+print("RbA stats")
+print("Min:", np.min(rba))
+print("Max:", np.max(rba))
+print("Mean:", np.mean(rba))
+
+plot_rba(img, rba)
