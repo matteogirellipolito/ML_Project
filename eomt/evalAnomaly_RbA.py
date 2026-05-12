@@ -1,7 +1,7 @@
 import os
 import glob
-import torch
 import random
+import torch
 import numpy as np
 
 from PIL import Image
@@ -9,15 +9,12 @@ from argparse import ArgumentParser
 
 import torch.nn.functional as F
 
-from sklearn.metrics import average_precision_score
+from torchvision.transforms import Compose, Resize, ToTensor
 
-from torchvision.transforms import (
-    Compose,
-    Resize,
-    ToTensor,
+from sklearn.metrics import (
+    average_precision_score,
+    roc_curve,
 )
-
-from ood_metrics import fpr_at_95_tpr
 
 from models.eomt import EoMT
 from models.vit import ViT
@@ -44,11 +41,24 @@ input_transform = Compose([
 ])
 
 target_transform = Compose([
-    Resize((512, 1024), Image.NEAREST),
+    Resize((256, 512), Image.NEAREST),
 ])
 
 # =========================================================
-# LOAD CHECKPOINT
+# METRICS
+# =========================================================
+
+def compute_fpr95(labels, scores):
+
+    fpr, tpr, thresholds = roc_curve(labels, scores)
+
+    idx = np.argmin(np.abs(tpr - 0.95))
+
+    return fpr[idx]
+
+
+# =========================================================
+# CHECKPOINT
 # =========================================================
 
 def extract_state_dict(checkpoint):
@@ -66,33 +76,31 @@ def load_my_state_dict(model, state_dict):
 
     own_state = model.state_dict()
 
+    loaded = 0
+
     for name, param in state_dict.items():
 
         if name.startswith("network."):
             name = name.replace("network.", "")
 
-        if name not in own_state:
-
-            if name.startswith("module."):
-                own_state[name.split("module.")[-1]].copy_(param)
-
-            else:
-                print(name, "not loaded")
-                continue
-
-        else:
+        if name in own_state:
 
             if own_state[name].shape == param.shape:
                 own_state[name].copy_(param)
+                loaded += 1
+
+    print(f"Loaded {loaded} parameters")
 
     return model
 
 
 # =========================================================
-# LOAD MODEL
+# MODEL
 # =========================================================
 
 def load_eomt(checkpoint_path, device):
+
+    print("Loading EoMT...")
 
     encoder = ViT(
         img_size=(640, 640),
@@ -134,8 +142,7 @@ def main():
     parser.add_argument(
         "--input",
         required=True,
-        nargs="+",
-        help="Input image glob"
+        help="Glob path"
     )
 
     parser.add_argument(
@@ -146,55 +153,50 @@ def main():
 
     args = parser.parse_args()
 
-    anomaly_score_list = []
-
-    ood_gts_list = []
-
-    if not os.path.exists("results.txt"):
-        open("results.txt", "w").close()
-
-    file = open("results.txt", "a")
-
     device = torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
 
-    # =====================================================
-    # MODEL
-    # =====================================================
-
     model = load_eomt(args.checkpoint, device)
 
-    # =====================================================
-    # LOOP
-    # =====================================================
+    image_paths = sorted(glob.glob(args.input))
 
-    for path in glob.glob(os.path.expanduser(str(args.input[0]))):
+    print(f"Found {len(image_paths)} images")
+
+    all_labels = []
+
+    all_rba_scores = []
+
+    for path in image_paths:
 
         print(path)
 
-        images = input_transform(
-            Image.open(path).convert("RGB")
-        ).unsqueeze(0).float().to(device)
+        # =====================================================
+        # IMAGE
+        # =====================================================
 
-        # =================================================
+        image = Image.open(path).convert("RGB")
+
+        image_tensor = input_transform(image).unsqueeze(0).to(device)
+
+        # =====================================================
         # FORWARD
-        # =================================================
+        # =====================================================
 
         with torch.no_grad():
 
-            result = model(images)
+            result = model(image_tensor)
 
         mask_logits = result[0][-1]
 
         class_logits = result[1][-1]
 
-        # =================================================
+        # =====================================================
         # UPSAMPLE
-        # =================================================
+        # =====================================================
 
-        H = 512
-        W = 1024
+        H = 256
+        W = 512
 
         mask_logits = F.interpolate(
             mask_logits,
@@ -203,16 +205,13 @@ def main():
             align_corners=False
         )
 
-        # =================================================
+        # =====================================================
         # PIXEL LOGITS
-        # =================================================
+        # =====================================================
 
         mask_probs = torch.sigmoid(mask_logits)
 
-        class_probs = torch.softmax(
-            class_logits,
-            dim=-1
-        )
+        class_probs = torch.softmax(class_logits, dim=-1)
 
         Mat_Class = class_probs.transpose(1, 2)
 
@@ -233,133 +232,111 @@ def main():
 
         pixel_logits = pixel_logits.squeeze(0)
 
-        # =================================================
+        # =====================================================
         # RBA SCORE
-        # =================================================
+        # =====================================================
 
-        anomaly_result = -torch.sum(
+        anomaly_score = -torch.sum(
             torch.tanh(pixel_logits.cpu()),
             dim=0
-        ).numpy()
+        )
 
-        # =================================================
-        # GT PATH
-        # =================================================
+        anomaly_score = anomaly_score.numpy()
 
-        pathGT = path.replace(
+        print(
+            "Anomaly score stats:",
+            anomaly_score.min(),
+            anomaly_score.max()
+        )
+
+        # =====================================================
+        # GT
+        # =====================================================
+
+        gt_path = path.replace(
             "images",
             "labels_masks"
         )
 
-        if "RoadObsticle21" in pathGT:
-            pathGT = pathGT.replace("webp", "png")
+        gt_path = gt_path.replace(".jpg", ".png")
+        gt_path = gt_path.replace(".jpeg", ".png")
+        gt_path = gt_path.replace(".webp", ".png")
 
-        if "fs_static" in pathGT:
-            pathGT = pathGT.replace("jpg", "png")
+        gt = Image.open(gt_path)
 
-        if "RoadAnomaly" in pathGT:
-            pathGT = pathGT.replace("jpg", "png")
+        gt = target_transform(gt)
 
-        # =================================================
-        # GT
-        # =================================================
+        gt = np.array(gt)
 
-        mask = Image.open(pathGT)
+        # =====================================================
+        # DATASET-SPECIFIC LABEL FIX
+        # =====================================================
 
-        mask = target_transform(mask)
+        if "RoadAnomaly" in gt_path:
+            gt = np.where(gt == 2, 1, gt)
 
-        ood_gts = np.array(mask)
+        if "LostAndFound" in gt_path:
+            gt = np.where(gt == 0, 255, gt)
+            gt = np.where(gt == 1, 0, gt)
+            gt = np.where((gt > 1) & (gt < 201), 1, gt)
 
-        if "RoadAnomaly" in pathGT:
-            ood_gts = np.where((ood_gts == 2), 1, ood_gts)
+        if "Streethazard" in gt_path:
+            gt = np.where(gt == 14, 255, gt)
+            gt = np.where(gt < 20, 0, gt)
+            gt = np.where(gt == 255, 1, gt)
 
-        if "LostAndFound" in pathGT:
-            ood_gts = np.where((ood_gts == 0), 255, ood_gts)
-            ood_gts = np.where((ood_gts == 1), 0, ood_gts)
-            ood_gts = np.where(
-                (ood_gts > 1) & (ood_gts < 201),
-                1,
-                ood_gts
-            )
+        # =====================================================
+        # VALID PIXELS
+        # =====================================================
 
-        if "Streethazard" in pathGT:
-            ood_gts = np.where((ood_gts == 14), 255, ood_gts)
-            ood_gts = np.where((ood_gts < 20), 0, ood_gts)
-            ood_gts = np.where((ood_gts == 255), 1, ood_gts)
+        valid_mask = gt != 255
 
-        # =================================================
-        # STORE
-        # =================================================
+        labels = gt[valid_mask]
 
-        if 1 not in np.unique(ood_gts):
+        scores = anomaly_score[valid_mask]
 
-            continue
+        all_labels.append(labels.flatten())
 
-        else:
-
-            ood_gts_list.append(ood_gts)
-
-            anomaly_score_list.append(anomaly_result)
+        all_rba_scores.append(scores.flatten())
 
         del result
-        del anomaly_result
-        del ood_gts
-        del mask
-
         torch.cuda.empty_cache()
 
-    # =====================================================
+    # =========================================================
+    # CONCAT
+    # =========================================================
+
+    all_labels = np.concatenate(all_labels)
+
+    all_rba_scores = np.concatenate(all_rba_scores)
+
+    # =========================================================
     # METRICS
-    # =====================================================
+    # =========================================================
 
-    file.write("\n")
-
-    ood_gts = np.array(ood_gts_list)
-
-    anomaly_scores = np.array(anomaly_score_list)
-
-    ood_mask = (ood_gts == 1)
-
-    ind_mask = (ood_gts == 0)
-
-    ood_out = anomaly_scores[ood_mask]
-
-    ind_out = anomaly_scores[ind_mask]
-
-    ood_label = np.ones(len(ood_out))
-
-    ind_label = np.zeros(len(ind_out))
-
-    val_out = np.concatenate((ind_out, ood_out))
-
-    val_label = np.concatenate((ind_label, ood_label))
-
-    prc_auc = average_precision_score(
-        val_label,
-        val_out
+    auprc = average_precision_score(
+        all_labels,
+        all_rba_scores
     )
 
-    fpr = fpr_at_95_tpr(
-        val_out,
-        val_label
+    fpr95 = compute_fpr95(
+        all_labels,
+        all_rba_scores
     )
 
-    # =====================================================
+    # =========================================================
     # RESULTS
-    # =====================================================
+    # =========================================================
 
-    print(f'AUPRC score: {prc_auc * 100.0}')
+    print("\n==============================")
+    print("RBA RESULTS")
+    print("==============================")
 
-    print(f'FPR@TPR95: {fpr * 100.0}')
+    print(f"AuPRC   : {auprc * 100:.2f}")
+    print(f"FPR95   : {fpr95 * 100:.2f}")
 
-    file.write(
-        '    AUPRC score:' + str(prc_auc * 100.0) +
-        '   FPR@TPR95:' + str(fpr * 100.0)
-    )
-
-    file.close()
+    print("==============================\n")
 
 
-if __name__ == '__main__':
-
+if __name__ == "__main__":
     main()
