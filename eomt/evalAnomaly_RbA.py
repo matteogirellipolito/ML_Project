@@ -1,235 +1,222 @@
 import os
+import glob
+import random
 import yaml
 import torch
-import importlib
-import warnings
 import numpy as np
-import matplotlib.pyplot as plt
 
-from torch.nn import functional as F
-from torch.amp.autocast_mode import autocast
-from lightning import seed_everything
-from huggingface_hub import hf_hub_download
-from huggingface_hub.utils import RepositoryNotFoundError
+from PIL import Image
+from argparse import ArgumentParser
 
-seed_everything(0, verbose=False)
+import torch.nn.functional as F
 
-# ==========================
+from torchvision.transforms import Compose, Resize, ToTensor
+
+from models.eomt import EoMT
+from models.vit import ViT
+
+# =========================
+# SEED
+# =========================
+
+seed = 42
+
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+
+# =========================
 # CONFIG
-# ==========================
-import argparse
+# =========================
 
-parser = argparse.ArgumentParser()
+NUM_CLASSES = 20
 
-parser.add_argument(
-    "--config",
-    type=str,
-    required=True
-)
+input_transform = Compose([
+    Resize((640, 640), Image.BILINEAR),
+    ToTensor(),
+])
 
-parser.add_argument(
-    "--input",
-    type=str,
-    required=True
-)
+target_transform = Compose([
+    Resize((256, 512), Image.NEAREST),
+])
 
-parser.add_argument(
-    "--device",
-    type=int,
-    default=0
-)
+# =========================
+# LOAD CHECKPOINT
+# =========================
 
-args = parser.parse_args()
+def extract_state_dict(checkpoint):
 
-device = args.device
-img_idx = 0
-config_path = args.config
-data_path = args.input
+    if "state_dict" in checkpoint:
+        return checkpoint["state_dict"]
 
-# ==========================
-# LOAD CONFIG
-# ==========================
-with open(config_path, "r") as f:
-    config = yaml.safe_load(f)
+    if "model" in checkpoint:
+        return checkpoint["model"]
 
-# ==========================
-# LOAD DATASET
-# ==========================
-data_module_name, class_name = config["data"]["class_path"].rsplit(".", 1)
-data_module = getattr(importlib.import_module(data_module_name), class_name)
+    return checkpoint
 
-data_module_kwargs = config["data"].get("init_args", {})
 
-data = data_module(
-    path=data_path,
-    batch_size=1,
-    num_workers=0,
-    check_empty_targets=False,
-    **data_module_kwargs
-)
+def load_my_state_dict(model, state_dict):
 
-data.setup()
+    own_state = model.state_dict()
 
-# ==========================
-# LOAD ENCODER
-# ==========================
-encoder_cfg = config["model"]["init_args"]["network"]["init_args"]["encoder"]
-encoder_module_name, encoder_class_name = encoder_cfg["class_path"].rsplit(".", 1)
-encoder_cls = getattr(importlib.import_module(encoder_module_name), encoder_class_name)
+    loaded = 0
 
-encoder = encoder_cls(
-    img_size=data.img_size,
-    **encoder_cfg.get("init_args", {})
-)
+    for name, param in state_dict.items():
 
-# ==========================
-# LOAD NETWORK (EoMT)
-# ==========================
-network_cfg = config["model"]["init_args"]["network"]
-network_module_name, network_class_name = network_cfg["class_path"].rsplit(".", 1)
-network_cls = getattr(importlib.import_module(network_module_name), network_class_name)
+        if name.startswith("network."):
+            name = name.replace("network.", "")
 
-network_kwargs = {
-    k: v for k, v in network_cfg["init_args"].items()
-    if k != "encoder"
-}
+        if name in own_state:
 
-network = network_cls(
-    masked_attn_enabled=False,
-    num_classes=data.num_classes,
-    encoder=encoder,
-    **network_kwargs
-)
+            if own_state[name].shape == param.shape:
+                own_state[name].copy_(param)
+                loaded += 1
 
-# ==========================
-# LOAD LIGHTNING MODULE
-# ==========================
-lit_module_name, lit_class_name = config["model"]["class_path"].rsplit(".", 1)
-lit_cls = getattr(importlib.import_module(lit_module_name), lit_class_name)
+    print(f"Loaded {loaded} parameters")
 
-model_kwargs = {
-    k: v for k, v in config["model"]["init_args"].items()
-    if k != "network"
-}
+    return model
 
-if "stuff_classes" in config["data"].get("init_args", {}):
-    model_kwargs["stuff_classes"] = config["data"]["init_args"]["stuff_classes"]
 
-model = lit_cls(
-    img_size=data.img_size,
-    num_classes=data.num_classes,
-    network=network,
-    **model_kwargs
-).eval().to(device)
+# =========================
+# LOAD MODEL
+# =========================
 
-# ==========================
-# LOAD PRETRAINED WEIGHTS
-# ==========================
-warnings.filterwarnings("ignore")
+def load_eomt(checkpoint_path, device):
 
-name = config.get("trainer", {}).get("logger", {}).get("init_args", {}).get("name")
+    print("Loading EoMT...")
 
-try:
-    state_dict_path = hf_hub_download(
-        repo_id=f"tue-mps/{name}",
-        filename="pytorch_model.bin",
+    encoder = ViT(
+        img_size=(640, 640),
+        patch_size=14,
+        backbone_name="vit_base_patch14_reg4_dinov2",
     )
 
-    state_dict = torch.load(
-        state_dict_path,
-        map_location=f"cuda:{device}",
+    model = EoMT(
+        encoder=encoder,
+        num_classes=NUM_CLASSES,
+        num_q=100,
+        num_blocks=3,
+        masked_attn_enabled=False,
+    ).to(device)
+
+    checkpoint = torch.load(
+        checkpoint_path,
+        map_location=device,
         weights_only=True
     )
 
-    model.load_state_dict(state_dict, strict=False)
+    checkpoint = extract_state_dict(checkpoint)
 
-except RepositoryNotFoundError:
-    raise RuntimeError("Checkpoint non trovato.")
+    model = load_my_state_dict(model, checkpoint)
 
-# ==========================
-# RbA SCORE
-# ==========================
-def compute_rba(mask_logits, class_logits):
-    class_probs = class_logits.softmax(dim=-1)[..., :-1]
-    uncertainty = 1.0 - class_probs.max(dim=-1)[0]
+    model.eval()
 
-    mask_probs = mask_logits.sigmoid()
+    return model
 
-    rba = torch.einsum(
-        "bqhw,bq->bhw",
-        mask_probs,
-        uncertainty
+
+# =========================
+# MAIN
+# =========================
+
+def main():
+
+    parser = ArgumentParser()
+
+    parser.add_argument(
+        "--input",
+        required=True,
+        help="Glob path to images"
     )
 
-    return rba
+    parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="Path to checkpoint"
+    )
 
-# ==========================
-# INFERENCE
-# ==========================
-def infer_rba(img):
-    with torch.no_grad(), autocast(dtype=torch.float16, device_type="cuda"):
+    args = parser.parse_args()
 
-        imgs = [img.to(device)]
-        transformed = model.resize_and_pad_imgs_instance_panoptic(imgs)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        mask_logits_per_layer, class_logits_per_layer = model(transformed)
+    model = load_eomt(args.checkpoint, device)
+
+    image_paths = sorted(glob.glob(args.input))
+
+    print(f"Found {len(image_paths)} images")
+
+    for path in image_paths:
+
+        print(path)
+
+        image = Image.open(path).convert("RGB")
+
+        image_tensor = input_transform(image).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+
+            result = model(image_tensor)
+
+        mask_logits = result[0][-1]
+        class_logits = result[1][-1]
+
+        # =========================
+        # UPSAMPLE
+        # =========================
+
+        H = 256
+        W = 512
 
         mask_logits = F.interpolate(
-            mask_logits_per_layer[-1],
-            model.img_size,
-            mode="bilinear"
+            mask_logits,
+            size=(H, W),
+            mode="bilinear",
+            align_corners=False
         )
 
-        rba = compute_rba(
-            mask_logits,
-            class_logits_per_layer[-1]
-        )[0]
+        # =========================
+        # PIXEL LOGITS
+        # =========================
 
-        rba = F.interpolate(
-            rba[None, None],
-            img.shape[-2:],
-            mode="bilinear"
-        )[0, 0]
+        mask_probs = torch.sigmoid(mask_logits)
 
-    return rba.cpu().numpy()
+        class_probs = torch.softmax(class_logits, dim=-1)
 
-# ==========================
-# HEATMAP
-# ==========================
-def plot_rba(img, rba):
-    img_np = img.permute(1,2,0).cpu().numpy()
+        Mat_Class = class_probs.transpose(1, 2)
 
-    plt.figure(figsize=(16,6))
+        Mat_Mask = torch.flatten(
+            mask_probs,
+            start_dim=2
+        )
 
-    plt.subplot(1,3,1)
-    plt.imshow(img_np)
-    plt.title("Input")
-    plt.axis("off")
+        pixel_logits = torch.matmul(
+            Mat_Class,
+            Mat_Mask
+        )
 
-    plt.subplot(1,3,2)
-    plt.imshow(rba, cmap="hot")
-    plt.title("RbA Heatmap")
-    plt.axis("off")
+        pixel_logits = pixel_logits.unflatten(
+            2,
+            (H, W)
+        )
 
-    plt.subplot(1,3,3)
-    plt.imshow(img_np)
-    plt.imshow(rba, cmap="hot", alpha=0.55)
-    plt.title("Overlay")
-    plt.axis("off")
+        pixel_logits = pixel_logits.squeeze(0)
 
-    plt.tight_layout()
-    plt.show()
+        # =========================
+        # RBA SCORE
+        # =========================
 
-# ==========================
-# RUN
-# ==========================
-img, target = data.val_dataloader().dataset[img_idx]
+        anomaly_score = -torch.sum(
+            torch.tanh(pixel_logits.cpu()),
+            dim=0
+        )
 
-rba = infer_rba(img)
+        anomaly_score = anomaly_score.numpy()
 
-print("RbA stats")
-print("Min:", np.min(rba))
-print("Max:", np.max(rba))
-print("Mean:", np.mean(rba))
+        print(
+            "Anomaly score stats:",
+            anomaly_score.min(),
+            anomaly_score.max()
+        )
 
-plot_rba(img, rba)
+
+if __name__ == "__main__":
+    main()
