@@ -243,12 +243,6 @@ def main():
 
         anomaly_score = anomaly_score.numpy()
 
-        print(
-            "Anomaly score stats:",
-            anomaly_score.min(),
-            anomaly_score.max()
-        )
-
         # =====================================================
         # GT
         # =====================================================
@@ -328,14 +322,11 @@ def main():
     # RESULTS
     # =========================================================
 
-    print("\n==============================")
-    print("RBA RESULTS")
+    print("\nRBA RESULTS")
     print("==============================")
 
-    print(f"AuPRC   : {auprc * 100:.2f}")
-    print(f"FPR95   : {fpr95 * 100:.2f}")
-
-    print("==============================\n")
+    print(f"AuPRC   : {auprc * 100}")
+    print(f"FPR95   : {fpr95 * 100}")
 
 
 if __name__ == "__main__":
