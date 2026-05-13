@@ -171,7 +171,7 @@ def load_eomt(args, device):
         masked_attn_enabled=True,
     ).to(device)
 
-    state_dict_path = "/content/drive/MyDrive/CourseProjectAnomaly/eomt_cityscapes.bin"
+    state_dict_path = args.loadWeightsDir + args.loadWeights
 
     print(f"Loading checkpoint from: {state_dict_path}")
 
