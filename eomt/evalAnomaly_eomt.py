@@ -132,7 +132,7 @@ def load_eomt(args, device):
 
     print(f"Loading config from: {yaml_path}")
     
-     network_cfg = (
+    network_cfg = (
         config["model"]
         ["init_args"]
         ["network"]
