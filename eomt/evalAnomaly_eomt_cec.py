@@ -108,6 +108,7 @@ def load_eomt(args, device):
         masked_attn_enabled=True,
     ).to(device)
 
+
     
     state_dict_path = args.dict_path
     
@@ -144,7 +145,7 @@ def main():
     anomaly_score_MSP_list = []
     anomaly_score_MaxLogit_list = []
     anomaly_score_Entropy_list = []
-    #anomaly_score_Rba_list = []
+    anomaly_score_Rba_list = []
     ood_gts_list = []
 
     if not os.path.exists('results.txt'):
@@ -193,6 +194,13 @@ def main():
 
          pixel_logits=torch.matmul(Mat_Class, Mat_Mask)
          pixel_logits = pixel_logits.unflatten(2, target_size) #return to H x W map from H*W vector
+         
+         #################
+         pixel_logits = pixel_logits.squeeze(0)
+         # RbA - calcolato prima della conversione a numpy
+         anomaly_result_Rba = -torch.sum(torch.tanh(pixel_logits), dim=0).cpu().numpy()
+         #################
+        
          pixel_logits = pixel_logits.squeeze(0).cpu().numpy() #loose Batch size dimension
 
          #evaluation scores
@@ -238,7 +246,7 @@ def main():
               anomaly_score_MSP_list.append(anomaly_result_MSP)
               anomaly_score_MaxLogit_list.append(anomaly_result_MaxLogit)
               anomaly_score_Entropy_list.append(anomaly_result_Entropy)
-              #anomaly_score_Rba_list.append(anomaly_result_Rba)
+              anomaly_score_Rba_list.append(anomaly_result_Rba)
          del result, anomaly_result_MSP, anomaly_result_MaxLogit, anomaly_result_Entropy ,ood_gts, mask #, anomaly_result_Rba
          torch.cuda.empty_cache()
 
@@ -291,9 +299,8 @@ def main():
 
 
    
-    # [prc_auc_Rba, fpr_Rba] = eval_metrics(ood_gts_list, anomaly_score_Rba_list)
-    # print(f'AUPRC rba score: {prc_auc_Rba*100.0}')
-    # print(f'FPR@TPR95 rba: {fpr_Rba*100.0}')
+    [prc_auc_Rba, fpr_Rba] = eval_metrics(ood_gts_list, anomaly_score_Rba_list)
+    print(f'AUPRC rba score: {prc_auc_Rba*100.0}', f'FPR@TPR95 rba: {fpr_Rba*100.0}')
 
 
     file.write(('      AUPRC softmax score:' + str(prc_auc_MSP*100.0) + '   FPR@TPR95 softmax:' + str(fpr_MSP*100.0) +
