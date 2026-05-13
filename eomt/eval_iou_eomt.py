@@ -193,7 +193,16 @@ def main():
 
         images, targets = batch
 
-        image = images[0].unsqueeze(0).to(device)
+        image = images[0].unsqueeze(0)
+
+        image = F.interpolate(
+            image,
+            size=(640, 640),
+            mode="bilinear",
+            align_corners=False
+        )
+
+        image = image.to(device)
 
         target = targets[0]
 
@@ -207,8 +216,16 @@ def main():
             semantic_gt
             .unsqueeze(0)
             .unsqueeze(0)
-            .cpu()
+            .float()
         )
+
+        semantic_gt = F.interpolate(
+            semantic_gt,
+            size=(640, 640),
+            mode="nearest"
+        )
+
+        semantic_gt = semantic_gt.long().cpu()
 
         # =================================================
         # FORWARD
