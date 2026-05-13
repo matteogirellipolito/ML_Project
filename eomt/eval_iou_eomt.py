@@ -160,20 +160,18 @@ def main():
         scale_range=(1.0, 1.0),
     )
 
-    dataset = CityscapesSemantic(
+    datamodule = CityscapesSemantic(
         path=args.data_path,
-        split="val",
-        transforms=transforms,
-    )
-
-    loader = DataLoader(
-        dataset,
         batch_size=1,
-        shuffle=False,
         num_workers=2,
+        img_size=(640, 640),
     )
 
-    print(f"Found {len(dataset)} validation images")
+    datamodule.setup()
+
+    loader = datamodule.val_dataloader()
+
+    print("Validation loader created")
 
     # =====================================================
     # IOU
