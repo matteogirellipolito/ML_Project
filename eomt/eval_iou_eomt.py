@@ -11,8 +11,8 @@ from argparse import ArgumentParser
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Resize, ToTensor
 
-from dataset import cityscapes
-from transform import Relabel, ToLabel
+from datasets.cityscapes_semantic import CityscapesSemantic
+from datasets.transforms import Relabel, ToLabel
 from iouEval import iouEval, getColorEntry
 
 from models.eomt import EoMT
@@ -137,7 +137,7 @@ def main(args):
     # =====================================================
 
     loader = DataLoader(
-        cityscapes(
+        CityscapesSemantic(
             args.datadir,
             input_transform_cityscapes,
             target_transform_cityscapes,
