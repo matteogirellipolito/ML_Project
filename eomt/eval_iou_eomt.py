@@ -4,10 +4,8 @@ import torch
 import torch.nn.functional as F
 
 from argparse import ArgumentParser
-from torch.utils.data import DataLoader
 
 from datasets.cityscapes_semantic import CityscapesSemantic
-from datasets.transforms import Transforms
 
 from models.eomt import EoMT
 from models.vit import ViT
@@ -113,7 +111,10 @@ def target_to_semantic(target):
 
     H, W = masks.shape[-2:]
 
-    semantic = torch.ones((H, W), dtype=torch.long) * 19
+    semantic = torch.ones(
+        (H, W),
+        dtype=torch.long
+    ) * 19
 
     for mask, cls in zip(masks, labels):
 
@@ -146,19 +147,20 @@ def main():
         "cuda" if torch.cuda.is_available() else "cpu"
     )
 
+    # =====================================================
+    # MODEL
+    # =====================================================
+
     print("Loading EoMT...")
 
-    model = load_eomt(args.checkpoint, device)
+    model = load_eomt(
+        args.checkpoint,
+        device
+    )
 
     # =====================================================
     # DATASET
     # =====================================================
-
-    transforms = Transforms(
-        img_size=(640, 640),
-        color_jitter_enabled=False,
-        scale_range=(1.0, 1.0),
-    )
 
     datamodule = CityscapesSemantic(
         path=args.data_path,
@@ -171,7 +173,9 @@ def main():
 
     loader = datamodule.val_dataloader()
 
-    print("Validation loader created")
+    print(
+        f"Found {len(datamodule.cityscapes_val_dataset)} validation images"
+    )
 
     # =====================================================
     # IOU
@@ -183,19 +187,28 @@ def main():
     # LOOP
     # =====================================================
 
-    for step, (image, target) in enumerate(loader):
+    for step, batch in enumerate(loader):
 
         print(step)
 
-        image = image.to(device)
+        images, targets = batch
+
+        image = images[0].unsqueeze(0).to(device)
+
+        target = targets[0]
 
         # =================================================
         # TARGET
         # =================================================
 
-        semantic_gt = target_to_semantic(target[0])
+        semantic_gt = target_to_semantic(target)
 
-        semantic_gt = semantic_gt.unsqueeze(0).unsqueeze(0)
+        semantic_gt = (
+            semantic_gt
+            .unsqueeze(0)
+            .unsqueeze(0)
+            .cpu()
+        )
 
         # =================================================
         # FORWARD
@@ -210,12 +223,26 @@ def main():
         class_logits = result[1][-1]
 
         # =================================================
+        # UPSAMPLE MASKS
+        # =================================================
+
+        mask_logits = F.interpolate(
+            mask_logits,
+            size=semantic_gt.shape[-2:],
+            mode="bilinear",
+            align_corners=False
+        )
+
+        # =================================================
         # PIXEL LOGITS
         # =================================================
 
         mask_probs = torch.sigmoid(mask_logits)
 
-        class_probs = torch.softmax(class_logits, dim=-1)
+        class_probs = torch.softmax(
+            class_logits,
+            dim=-1
+        )
 
         Mat_Class = class_probs.transpose(1, 2)
 
@@ -229,8 +256,8 @@ def main():
             Mat_Mask
         )
 
-        H = mask_logits.shape[-2]
-        W = mask_logits.shape[-1]
+        H = semantic_gt.shape[-2]
+        W = semantic_gt.shape[-1]
 
         pixel_logits = pixel_logits.unflatten(
             2,
@@ -242,12 +269,21 @@ def main():
         # remove void class
         pixel_logits = pixel_logits[:-1]
 
+        # =================================================
+        # PREDICTION
+        # =================================================
+
         prediction = torch.argmax(
             pixel_logits,
             dim=0
         )
 
-        prediction = prediction.unsqueeze(0).unsqueeze(0).cpu()
+        prediction = (
+            prediction
+            .unsqueeze(0)
+            .unsqueeze(0)
+            .cpu()
+        )
 
         # =================================================
         # IOU
@@ -267,25 +303,47 @@ def main():
     print("---------------------------------------")
     print("Per-Class IoU:")
 
+    class_names = [
+        "Road",
+        "Sidewalk",
+        "Building",
+        "Wall",
+        "Fence",
+        "Pole",
+        "Traffic Light",
+        "Traffic Sign",
+        "Vegetation",
+        "Terrain",
+        "Sky",
+        "Person",
+        "Rider",
+        "Car",
+        "Truck",
+        "Bus",
+        "Train",
+        "Motorcycle",
+        "Bicycle"
+    ]
+
     for i in range(iou_classes.size(0)):
 
-        iouStr = getColorEntry(
-            iou_classes[i]
-        ) + '{:0.2f}'.format(
-            iou_classes[i] * 100
-        ) + '\033[0m'
+        iouStr = (
+            getColorEntry(iou_classes[i])
+            + '{:0.2f}'.format(iou_classes[i] * 100)
+            + '\033[0m'
+        )
 
-        print(f"Class {i}: {iouStr}")
+        print(f"{class_names[i]}: {iouStr}")
 
     print("=======================================")
 
-    iouStr = getColorEntry(
-        iouVal.item()
-    ) + '{:0.2f}'.format(
-        iouVal.item() * 100
-    ) + '\033[0m'
+    iouStr = (
+        getColorEntry(iouVal.item())
+        + '{:0.2f}'.format(iouVal.item() * 100)
+        + '\033[0m'
+    )
 
-    print("MEAN IoU: ", iouStr, "%")
+    print("MEAN IoU:", iouStr, "%")
 
 
 if __name__ == "__main__":
