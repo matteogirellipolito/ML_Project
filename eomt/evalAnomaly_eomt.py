@@ -171,7 +171,7 @@ def load_eomt(args, device):
         masked_attn_enabled=True,
     ).to(device)
 
-    state_dict_path = args.loadWeightsDir + args.loadWeights
+    state_dict_path = args.loadWeights
 
     print(f"Loading checkpoint from: {state_dict_path}")
 
@@ -189,9 +189,7 @@ def load_eomt(args, device):
     return model
 
 
-# -----------------------------------------------------------------------------
-# MAIN
-# -----------------------------------------------------------------------------
+#MAIN
 
 def main():
 
@@ -212,8 +210,7 @@ def main():
 
     parser.add_argument('--loadConfigDir', default='../eomt/configs/dinov2/cityscapes/semantic/')
     parser.add_argument('--loadConfig', default='eomt_base_640.yaml')
-    parser.add_argument('--loadWeightsDir',default='../trained_models/')
-    parser.add_argument('--loadWeights',default='eomt_cityscapes.bin')
+    parser.add_argument('--loadWeights',default='/content/drive/MyDrive/eomt_cityscapes.bin')
 
     parser.add_argument('--subset', default="val")
 
