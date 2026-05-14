@@ -59,13 +59,13 @@ torch.backends.cudnn.benchmark = True
 
 # image preprocessing
 input_transform = Compose([
-    Resize((640, 640), Image.BILINEAR),
+    Resize((1024, 1024), Image.BILINEAR),
     ToTensor(),
         # Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]), # Standard ImageNet/DINO
 ])
 
 target_transform = Compose([
-    Resize((640, 640), Image.NEAREST),
+    Resize((512, 1024), Image.NEAREST),
 ])
 
 
@@ -151,7 +151,7 @@ def load_eomt(args, device):
 
     num_blocks = network_cfg["num_blocks"]
 
-    img_size=(640, 640) #or (512, 1024) ????
+    img_size=(1024, 1024) #or (512, 1024) ????
 
     print(f"Backbone: {backbone_name}")
     print(f"Num queries: {num_queries}")
@@ -159,7 +159,7 @@ def load_eomt(args, device):
 
     encoder = ViT(
         img_size=img_size,
-        patch_size=14,
+        patch_size=16,
         backbone_name=backbone_name,
     )
 
@@ -256,8 +256,8 @@ def main():
         mask_logits = result[0][-1] #last layer mask logits
         class_logits = result[1][-1] #last layer class logits 
 
-        H=640
-        W=640
+        H=512
+        W=1024
         target_size = (H, W) #TO DO: chek size with config model
 
         # masks upsampling
