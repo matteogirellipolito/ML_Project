@@ -247,7 +247,7 @@ def main():
               anomaly_score_MaxLogit_list.append(anomaly_result_MaxLogit)
               anomaly_score_Entropy_list.append(anomaly_result_Entropy)
               anomaly_score_Rba_list.append(anomaly_result_Rba)
-         del result, anomaly_result_MSP, anomaly_result_MaxLogit, anomaly_result_Entropy ,ood_gts, mask #, anomaly_result_Rba
+         del result, anomaly_result_MSP, anomaly_result_MaxLogit, anomaly_result_Entropy, anomaly_result_Rba, ood_gts, mask #, anomaly_result_Rba
          torch.cuda.empty_cache()
 
 
@@ -306,6 +306,7 @@ def main():
     file.write(('      AUPRC softmax score:' + str(prc_auc_MSP*100.0) + '   FPR@TPR95 softmax:' + str(fpr_MSP*100.0) +
                 '\n    AUPRC logit score:' + str(prc_auc_MaxLogit*100.0) + '   FPR@TPR95 logit:' + str(fpr_MaxLogit*100.0) +
                 '\n    AUPRC entropy score:' + str(prc_auc_Entropy*100.0) + '   FPR@TPR95 entropy:' + str(fpr_Entropy*100.0) + '\n'
+                '\n    AUPRC rba score:' + str(prc_auc_Rba*100.0) + '   FPR@TPR95 rba:' + str(fpr_Rba*100.0) + '\n'
                 ))
 
     file.close()
