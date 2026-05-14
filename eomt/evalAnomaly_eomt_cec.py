@@ -193,7 +193,7 @@ def main():
          Mat_Mask=torch.flatten(input=mask_probs, start_dim=2)
 
          pixel_logits=torch.matmul(Mat_Class, Mat_Mask)
-         pixel_logits = pixel_logits.unflatten(2, (H, W)) #return to H x W map from H*W vector
+         pixel_logits = pixel_logits.unflatten(2, target_size) #return to H x W map from H*W vector
          pixel_logits = pixel_logits.squeeze(0) #loose Batch size dimension
          pixel_logits = pixel_logits[:-1, :, :] #remove last class
         
