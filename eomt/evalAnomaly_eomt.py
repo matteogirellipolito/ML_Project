@@ -282,9 +282,9 @@ def main():
         pixel_logits=torch.matmul(Mat_Class, Mat_Mask)
         pixel_logits = pixel_logits.unflatten(2, (H, W)) #return to H x W map from H*W vector
         pixel_logits = pixel_logits.squeeze(0) #loose Batch size dimension
-        print("pixel_logits shape:", pixel_logits.shape)
+       #print("pixel_logits shape:", pixel_logits.shape)
         pixel_logits=pixel_logits[:-1, :, :]
-        print("pixel_logits shape after pixel_logits=pixel_logits[:-1, :, :]:", pixel_logits.shape)
+        #print("pixel_logits shape after pixel_logits=pixel_logits[:-1, :, :]:", pixel_logits.shape)
 
         
         # pixel probabilities
