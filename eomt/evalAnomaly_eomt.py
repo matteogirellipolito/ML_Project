@@ -364,9 +364,7 @@ def main():
 
     file.write("\n")
 
-    # -------------------------------------------------------------------------
-    # METRICS
-    # -------------------------------------------------------------------------
+  # metrics evaluation
 
     def eval_metrics(ood_gts_list, anomaly_score_list):
 
@@ -397,23 +395,20 @@ def main():
     [prc_auc_Entropy, fpr_Entropy] = eval_metrics(ood_gts_list, anomaly_score_Entropy_list)
     [prc_auc_Rba, fpr_Rba] = eval_metrics(ood_gts_list, anomaly_score_Rba_list)
 
-    print(f'AUPRC logit score: {prc_auc_MaxLogit*100.0}')
-    print(f'FPR@TPR95 logit: {fpr_MaxLogit*100.0}')
+    print(f'AUPRC MSP score: {prc_auc_MSP*100.0}')
+    print(f'FPR@TPR95 MSP: {fpr_MSP*100.0}')
 
-    print(f'AUPRC softmax score: {prc_auc_MSP*100.0}')
-    print(f'FPR@TPR95 softmax: {fpr_MSP*100.0}')
+    print(f'AUPRC MaxLogit score: {prc_auc_MaxLogit*100.0}')
+    print(f'FPR@TPR95 MaxLogit: {fpr_MaxLogit*100.0}')
 
-    print(f'AUPRC entropy score: {prc_auc_Entropy*100.0}')
-    print(f'FPR@TPR95 entropy: {fpr_Entropy*100.0}')
+    print(f'AUPRC Entropy score: {prc_auc_Entropy*100.0}')
+    print(f'FPR@TPR95 Entropy: {fpr_Entropy*100.0}')
 
-    print(f'AUPRC rba score: {prc_auc_Rba*100.0}')
-    print(f'FPR@TPR95 rba: {fpr_Rba*100.0}')
+    print(f'AUPRC Rba score: {prc_auc_Rba*100.0}')
+    print(f'FPR@TPR95 Rba: {fpr_Rba*100.0}')
 
 
-    # -------------------------------------------------------------------------
-    # SAVE RESULTS
-    # -------------------------------------------------------------------------
-
+  
     file.write(
         (
             'AUPRC softmax score: '
