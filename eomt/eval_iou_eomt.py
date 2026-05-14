@@ -26,7 +26,9 @@ torch.manual_seed(seed)
 # CONFIG
 # =========================================================
 
-NUM_CLASSES = 20
+# 19 semantic classes for Cityscapes
+# ignore label = 19
+NUM_CLASSES = 19
 
 # =========================================================
 # CHECKPOINT
@@ -34,17 +36,14 @@ NUM_CLASSES = 20
 
 def extract_state_dict(checkpoint):
 
-    checkpoint = torch.load(
-    "/content/drive/MyDrive/ML_Project/eomt_cityscapes.bin",
-    map_location="cpu"
-)
-
     print(checkpoint.keys())
 
     if "state_dict" in checkpoint:
         sd = checkpoint["state_dict"]
+
     elif "model" in checkpoint:
         sd = checkpoint["model"]
+
     else:
         sd = checkpoint
 
@@ -53,30 +52,63 @@ def extract_state_dict(checkpoint):
     for k in list(sd.keys())[:50]:
         print(k)
 
-    return checkpoint
+    return sd
 
 
 def load_my_state_dict(model, state_dict):
 
     own_state = model.state_dict()
-    missing = []
+
     loaded = 0
 
+    missing_keys = []
+
+    shape_mismatch = []
+
     for name, param in state_dict.items():
+
+        original_name = name
 
         if name.startswith("network."):
             name = name.replace("network.", "")
 
-        if name in own_state:
+        if name not in own_state:
 
-            if own_state[name].shape == param.shape:
-                own_state[name].copy_(param)
-                loaded += 1
-            else:
-                missing.append(name)
+            missing_keys.append(original_name)
 
-    print(f"Loaded {loaded} parameters")
-    print(f"Missing {len(missing)} parameters")
+            continue
+
+        if own_state[name].shape != param.shape:
+
+            shape_mismatch.append(
+                (
+                    original_name,
+                    param.shape,
+                    own_state[name].shape
+                )
+            )
+
+            continue
+
+        own_state[name].copy_(param)
+
+        loaded += 1
+
+    print(f"\nLoaded parameters: {loaded}")
+
+    print(f"\nMissing keys: {len(missing_keys)}")
+
+    for k in missing_keys:
+        print("MISSING:", k)
+
+    print(f"\nShape mismatches: {len(shape_mismatch)}")
+
+    for k, ckpt_shape, model_shape in shape_mismatch:
+
+        print(
+            f"SHAPE MISMATCH: {k} | "
+            f"ckpt={ckpt_shape} model={model_shape}"
+        )
 
     return model
 
@@ -95,7 +127,7 @@ def load_eomt(checkpoint_path, device):
 
     model = EoMT(
         encoder=encoder,
-        num_classes=20,
+        num_classes=NUM_CLASSES,
         num_q=100,
         num_blocks=3,
         masked_attn_enabled=False,
@@ -123,10 +155,12 @@ def load_eomt(checkpoint_path, device):
 def target_to_semantic(target):
 
     masks = target["masks"]
+
     labels = target["labels"]
 
     H, W = masks.shape[-2:]
 
+    # ignore label = 19
     semantic = torch.ones(
         (H, W),
         dtype=torch.long
@@ -197,13 +231,18 @@ def main():
     # IOU
     # =====================================================
 
-    iouEvalVal = iouEval(NUM_CLASSES)
+    iouEvalVal = iouEval(
+        NUM_CLASSES,
+        ignoreIndex=19
+    )
 
     # =====================================================
     # LOOP
     # =====================================================
 
     for step, batch in enumerate(loader):
+
+        print(step)
 
         images, targets = batch
 
@@ -288,6 +327,7 @@ def main():
         )
 
         H = semantic_gt.shape[-2]
+
         W = semantic_gt.shape[-1]
 
         pixel_logits = pixel_logits.unflatten(
@@ -296,9 +336,6 @@ def main():
         )
 
         pixel_logits = pixel_logits.squeeze(0)
-
-        # remove void class
-        pixel_logits = pixel_logits[:-1]
 
         # =================================================
         # PREDICTION
@@ -332,6 +369,7 @@ def main():
     iouVal, iou_classes = iouEvalVal.getIoU()
 
     print("---------------------------------------")
+
     print("Per-Class IoU:")
 
     class_names = [
@@ -359,7 +397,7 @@ def main():
     for i in range(iou_classes.size(0)):
 
         iouStr = (
-            getColorEntry(iou_classes[i])
+            getColorEntry(iou_classes[i].item())
             + '{:0.2f}'.format(iou_classes[i] * 100)
             + '\033[0m'
         )
