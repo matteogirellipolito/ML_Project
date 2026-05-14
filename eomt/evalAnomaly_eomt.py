@@ -51,7 +51,7 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 
 NUM_CHANNELS = 3
-NUM_CLASSES = 20
+NUM_CLASSES = 19
 
 # gpu training specific
 torch.backends.cudnn.deterministic = True
@@ -282,9 +282,11 @@ def main():
         pixel_logits=torch.matmul(Mat_Class, Mat_Mask)
         pixel_logits = pixel_logits.unflatten(2, (H, W)) #return to H x W map from H*W vector
         pixel_logits = pixel_logits.squeeze(0) #loose Batch size dimension
+        print("pixel_logits shape:", pixel_logits.shape)
+        pixel_logits=pixel_logits[:-1, :, :]
+        print("pixel_logits shape after pixel_logits=pixel_logits[:-1, :, :]:", pixel_logits.shape)
 
         
-
         # pixel probabilities
         pixel_probs = torch.softmax(pixel_logits, dim=0)
 
