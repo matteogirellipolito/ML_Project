@@ -1,7 +1,9 @@
-import random
 import numpy as np
 import torch
 import torch.nn.functional as F
+import os
+import time
+import random
 
 from argparse import ArgumentParser
 
@@ -11,6 +13,12 @@ from models.eomt import EoMT
 from models.vit import ViT
 
 from iouEval import iouEval, getColorEntry
+
+# =========================================================
+# CONFIG
+# =========================================================
+
+NUM_CLASSES = 20
 
 # =========================================================
 # SEED
@@ -23,34 +31,16 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 
 # =========================================================
-# CONFIG
+# LOAD STATE DICT
 # =========================================================
-
-# 19 classi Cityscapes valide + 1 ignore (indice 19) = 20 per iouEval
-NUM_CLASSES = 20
-
-# =========================================================
-# CHECKPOINT
-# =========================================================
-
-def extract_state_dict(checkpoint):
-
-    if "state_dict" in checkpoint:
-        return checkpoint["state_dict"]
-
-    if "model" in checkpoint:
-        return checkpoint["model"]
-
-    return checkpoint
-
 
 def load_my_state_dict(model, state_dict):
 
     own_state = model.state_dict()
 
     loaded = 0
-    missing_keys = []
-    shape_mismatch = []
+    missing = []
+    mismatch = []
 
     for name, param in state_dict.items():
 
@@ -60,260 +50,373 @@ def load_my_state_dict(model, state_dict):
             name = name.replace("network.", "")
 
         if name not in own_state:
-            missing_keys.append(original_name)
+            missing.append(original_name)
             continue
 
         if own_state[name].shape != param.shape:
-            shape_mismatch.append((original_name, param.shape, own_state[name].shape))
+            mismatch.append(
+                (
+                    original_name,
+                    param.shape,
+                    own_state[name].shape
+                )
+            )
             continue
 
         own_state[name].copy_(param)
+
         loaded += 1
 
-    print(f"\nLoaded parameters: {loaded}")
-    print(f"Missing keys: {len(missing_keys)}")
-    print(f"Shape mismatches: {len(shape_mismatch)}")
+    print("\n================ MODEL LOAD ================")
+    print(f"Loaded params: {loaded}")
+    print(f"Missing keys: {len(missing)}")
+    print(f"Shape mismatches: {len(mismatch)}")
 
-    for k, ckpt_shape, model_shape in shape_mismatch:
-        print(f"  SHAPE MISMATCH: {k} | ckpt={ckpt_shape} model={model_shape}")
+    if len(mismatch) > 0:
+
+        print("\n--- SHAPE MISMATCHES ---")
+
+        for name, ckpt_shape, model_shape in mismatch:
+
+            print(
+                f"{name}\n"
+                f"  checkpoint: {ckpt_shape}\n"
+                f"  model:      {model_shape}"
+            )
+
+    print("============================================\n")
 
     return model
-
 
 # =========================================================
 # MODEL
 # =========================================================
 
-def load_eomt(checkpoint_path, device):
+def load_eomt(weightspath, device):
 
-    print("Loading EoMT...")
+    print("Creating ViT backbone...")
 
     encoder = ViT(
-        img_size=(640, 640),
-        patch_size=16,
+        img_size=(1024, 1024),
+        patch_size=14,
         backbone_name="vit_base_patch14_reg4_dinov2",
     )
 
+    print("Creating EoMT...")
+
     model = EoMT(
         encoder=encoder,
-        num_classes=19,       # 19 classi Cityscapes → class_head avrà 20 output (19+1 void)
+        num_classes=19,
         num_q=100,
         num_blocks=3,
         masked_attn_enabled=False,
-    ).to(device)
-
-    checkpoint = torch.load(
-        checkpoint_path,
-        map_location=device,
-        weights_only=True
     )
 
-    checkpoint = extract_state_dict(checkpoint)
+    print("\nLoading checkpoint...")
+    print(weightspath)
 
-    model = load_my_state_dict(model, checkpoint)
+    checkpoint = torch.load(
+        weightspath,
+        map_location="cpu"
+    )
+
+    print("\nCheckpoint type:")
+    print(type(checkpoint))
+
+    if isinstance(checkpoint, dict):
+
+        print("\nCheckpoint keys:")
+        print(checkpoint.keys())
+
+    if "state_dict" in checkpoint:
+
+        print("\nUsing checkpoint['state_dict']")
+        checkpoint = checkpoint["state_dict"]
+
+    elif "model" in checkpoint:
+
+        print("\nUsing checkpoint['model']")
+        checkpoint = checkpoint["model"]
+
+    print("\nFirst 20 parameter keys:\n")
+
+    for i, k in enumerate(checkpoint.keys()):
+
+        print(k)
+
+        if i >= 20:
+            break
+
+    model = load_my_state_dict(
+        model,
+        checkpoint
+    )
+
+    model = model.to(device)
 
     model.eval()
 
     return model
 
-
 # =========================================================
-# TARGET CONVERSION
+# TARGET -> SEMANTIC
 # =========================================================
 
 def target_to_semantic(target):
-    """Converte le maschere binarie in mappa semantica 2D."""
 
-    masks  = target["masks"]
+    masks = target["masks"]
     labels = target["labels"]
 
     H, W = masks.shape[-2:]
 
-    # Inizializza tutto a 19 (ignore label)
-    semantic = torch.ones((H, W), dtype=torch.long) * 19
+    semantic = torch.ones(
+        (H, W),
+        dtype=torch.long
+    ) * 19
 
     for mask, cls in zip(masks, labels):
+
         semantic[mask.bool()] = cls
 
     return semantic
-
 
 # =========================================================
 # MAIN
 # =========================================================
 
-def main():
+def main(args):
 
-    parser = ArgumentParser()
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
+    )
 
-    parser.add_argument("--data_path",  required=True,
-                        help="Cartella con i zip di Cityscapes")
-    parser.add_argument("--checkpoint", required=True,
-                        help="Path al checkpoint EoMT (.bin o .pth)")
-
-    args = parser.parse_args()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("\nDEVICE:", device)
 
     # =====================================================
     # MODEL
     # =====================================================
 
-    model = load_eomt(args.checkpoint, device)
+    print("\nLoading EoMT...")
+
+    model = load_eomt(
+        args.loadWeights,
+        device
+    )
 
     # =====================================================
     # DATASET
     # =====================================================
 
+    print("\nCreating datamodule...")
+
     datamodule = CityscapesSemantic(
-        path=args.data_path,
+        path=args.datadir,
         batch_size=1,
-        num_workers=2,
-        img_size=(640, 640),
+        num_workers=args.num_workers,
+        img_size=(1024, 1024),
     )
 
     datamodule.setup()
 
     loader = datamodule.val_dataloader()
 
-    print(f"Found {len(datamodule.cityscapes_val_dataset)} validation images")
+    print(
+        f"\nFound {len(datamodule.cityscapes_val_dataset)} validation images"
+    )
 
     # =====================================================
-    # IOU EVAL
-    # iouEval(20, ignoreIndex=19):
-    #   - valuta classi 0-18 (le 19 classi Cityscapes)
-    #   - ignora pixel dove GT=19 (ignore label)
+    # IOU
     # =====================================================
 
-    iouEvalVal = iouEval(NUM_CLASSES, ignoreIndex=19)
+    iouEvalVal = iouEval(NUM_CLASSES)
+
+    start = time.time()
 
     # =====================================================
     # LOOP
     # =====================================================
 
-    for step, batch in enumerate(loader):
+    for step, (images, targets) in enumerate(loader):
 
-        print(f"Step {step}")
-
-        images, targets = batch
-
-        image = images[0].unsqueeze(0)
-
-        image = F.interpolate(
-            image,
-            size=(640, 640),
-            mode="bilinear",
-            align_corners=False
-        )
-
-        image = image.to(device)
+        if not args.cpu:
+            images = images.cuda()
 
         target = targets[0]
 
-        # =================================================
-        # GROUND TRUTH
-        # =================================================
-
-        semantic_gt = target_to_semantic(target)   # [H, W], valori 0-19
+        semantic_gt = target_to_semantic(target)
 
         semantic_gt = (
             semantic_gt
             .unsqueeze(0)
             .unsqueeze(0)
-            .float()
+            .cpu()
         )
-
-        semantic_gt = F.interpolate(
-            semantic_gt,
-            size=(640, 640),
-            mode="nearest"
-        )
-
-        semantic_gt = semantic_gt.long().cpu()     # [1, 1, 640, 640]
 
         # =================================================
-        # FORWARD PASS
+        # DEBUG GT
+        # =================================================
+
+        if step == 0:
+
+            print("\n================ GT DEBUG ================")
+
+            print("GT shape:")
+            print(semantic_gt.shape)
+
+            print("GT unique classes:")
+            print(torch.unique(semantic_gt))
+
+            print("==========================================")
+
+        # =================================================
+        # FORWARD
         # =================================================
 
         with torch.no_grad():
-            result = model(image)
 
-        mask_logits  = result[0][-1]   # [1, num_q, H_small, W_small]
-        class_logits = result[1][-1]   # [1, num_q, 20]  (19 classi + void)
+            outputs = model(images)
 
         # =================================================
-        # UPSAMPLE MASCHERE
+        # OUTPUTS
         # =================================================
 
-        mask_logits = F.interpolate(
-            mask_logits,
-            size=semantic_gt.shape[-2:],
-            mode="bilinear",
-            align_corners=False
-        )                                          # [1, num_q, 640, 640]
+        mask_logits = outputs[0][-1]
+        class_logits = outputs[1][-1]
+
+        if step == 0:
+
+            print("\n================ OUTPUT DEBUG ================")
+
+            print("mask_logits shape:")
+            print(mask_logits.shape)
+
+            print("class_logits shape:")
+            print(class_logits.shape)
+
+            print("\nmask logits stats:")
+            print(mask_logits.min().item())
+            print(mask_logits.max().item())
+
+            print("\nclass logits stats:")
+            print(class_logits.min().item())
+            print(class_logits.max().item())
+
+            print("==============================================")
 
         # =================================================
-        # PIXEL LOGITS
+        # QUERY -> PIXEL
         # =================================================
 
-        mask_probs  = torch.sigmoid(mask_logits)           # [1, num_q, 640, 640]
-        class_probs = torch.softmax(class_logits, dim=-1)  # [1, num_q, 20]
+        mask_probs = torch.sigmoid(mask_logits)
 
-        Mat_Class = class_probs.transpose(1, 2)            # [1, 20, num_q]
-        Mat_Mask  = torch.flatten(mask_probs, start_dim=2) # [1, num_q, 640*640]
+        class_probs = torch.softmax(
+            class_logits,
+            dim=-1
+        )
 
-        pixel_logits = torch.matmul(Mat_Class, Mat_Mask)   # [1, 20, 640*640]
+        class_probs = class_probs.transpose(1, 2)
 
-        H, W = semantic_gt.shape[-2], semantic_gt.shape[-1]
-        pixel_logits = pixel_logits.unflatten(2, (H, W))   # [1, 20, 640, 640]
-        pixel_logits = pixel_logits.squeeze(0)             # [20, 640, 640]
+        mask_probs = torch.flatten(
+            mask_probs,
+            start_dim=2
+        )
 
-        # Rimuovi la classe void (ultimo canale) prima dell'argmax
-        # → predizioni nell'intervallo 0-18 (le 19 classi valide)
-        pixel_logits = pixel_logits[:-1]                   # [19, 640, 640]
+        pixel_logits = torch.matmul(
+            class_probs,
+            mask_probs
+        )
+
+        H = mask_logits.shape[-2]
+        W = mask_logits.shape[-1]
+
+        pixel_logits = pixel_logits.unflatten(
+            2,
+            (H, W)
+        )
+
+        # remove void
+        pixel_logits = pixel_logits[:, :-1]
 
         # =================================================
-        # PREDIZIONE
+        # PREDICTION
         # =================================================
 
-        prediction = torch.argmax(pixel_logits, dim=0)    # [640, 640], valori 0-18
+        prediction = pixel_logits.max(1)[1]
 
-        prediction = (
-            prediction
-            .unsqueeze(0)
-            .unsqueeze(0)
-            .cpu()
-        )                                                  # [1, 1, 640, 640]
+        prediction = prediction.unsqueeze(1).cpu()
 
         # =================================================
-        # AGGIORNA IOU
+        # DEBUG PRED
         # =================================================
 
-        iouEvalVal.addBatch(prediction, semantic_gt)
+        if step == 0:
+
+            print("\n================ PRED DEBUG ================")
+
+            print("Prediction shape:")
+            print(prediction.shape)
+
+            print("Prediction unique classes:")
+            print(torch.unique(prediction))
+
+            print("============================================")
+
+        # =================================================
+        # IOU
+        # =================================================
+
+        iouEvalVal.addBatch(
+            prediction,
+            semantic_gt
+        )
+
+        print(step)
 
     # =====================================================
-    # RISULTATI
+    # RESULTS
     # =====================================================
 
     iouVal, iou_classes = iouEvalVal.getIoU()
 
-    class_names = [
-        "Road", "Sidewalk", "Building", "Wall", "Fence",
-        "Pole", "Traffic Light", "Traffic Sign", "Vegetation", "Terrain",
-        "Sky", "Person", "Rider", "Car", "Truck",
-        "Bus", "Train", "Motorcycle", "Bicycle"
-    ]
-
     print("---------------------------------------")
+    print("Took ", time.time()-start, "seconds")
+    print("=======================================")
+
     print("Per-Class IoU:")
 
-    for i in range(iou_classes.size(0)):
+    class_names = [
+        "Road",
+        "Sidewalk",
+        "Building",
+        "Wall",
+        "Fence",
+        "Pole",
+        "Traffic Light",
+        "Traffic Sign",
+        "Vegetation",
+        "Terrain",
+        "Sky",
+        "Person",
+        "Rider",
+        "Car",
+        "Truck",
+        "Bus",
+        "Train",
+        "Motorcycle",
+        "Bicycle"
+    ]
+
+    for i in range(19):
+
+        value = iou_classes[i].item()
+
         iouStr = (
-            getColorEntry(iou_classes[i].item())
-            + '{:0.2f}'.format(iou_classes[i].item() * 100)
+            getColorEntry(value)
+            + '{:0.2f}'.format(value * 100)
             + '\033[0m'
         )
-        print(f"  {class_names[i]}: {iouStr}")
+
+        print(f"{class_names[i]}: {iouStr}")
 
     print("=======================================")
 
@@ -325,6 +428,33 @@ def main():
 
     print("MEAN IoU:", iouStr, "%")
 
+# =========================================================
+# ENTRY
+# =========================================================
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+
+    parser = ArgumentParser()
+
+    parser.add_argument(
+        '--loadWeights',
+        required=True
+    )
+
+    parser.add_argument(
+        '--datadir',
+        required=True
+    )
+
+    parser.add_argument(
+        '--num-workers',
+        type=int,
+        default=4
+    )
+
+    parser.add_argument(
+        '--cpu',
+        action='store_true'
+    )
+
+    main(parser.parse_args())
