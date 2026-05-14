@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torchvision.transforms import ToPILImage, ToTensor, Resize
+from torchvision.transforms import InterpolationMode
 import os
 import time
 import random
@@ -220,6 +222,20 @@ def main(args):
 
     loader = datamodule.val_dataloader()
 
+    # =====================================================
+    # RESIZE LIKE ERFNET
+    # =====================================================
+
+    image_resize = Resize(
+        (1024, 1024),
+        interpolation=InterpolationMode.BILINEAR
+    )
+
+    target_resize = Resize(
+        (1024, 1024),
+        interpolation=InterpolationMode.NEAREST
+    )
+
     print(
         f"\nFound {len(datamodule.cityscapes_val_dataset)} validation images"
     )
@@ -242,6 +258,12 @@ def main(args):
 
         image = images[0]
 
+        # =====================================================
+        # RESIZE IMAGE
+        # =====================================================
+
+        image = image_resize(image)
+
         if not args.cpu:
             image = image.cuda()
 
@@ -249,12 +271,17 @@ def main(args):
 
         semantic_gt = target_to_semantic(target)
 
-        semantic_gt = (
-            semantic_gt
-            .unsqueeze(0)
-            .unsqueeze(0)
-            .cpu()
-        )
+        semantic_gt = semantic_gt.unsqueeze(0)
+
+        # =====================================================
+        # RESIZE GT
+        # =====================================================
+
+        semantic_gt = target_resize(semantic_gt)
+
+        semantic_gt = semantic_gt.long()
+
+        semantic_gt = semantic_gt.unsqueeze(0).cpu()
 
         # =============================================
         # DEBUG GT
