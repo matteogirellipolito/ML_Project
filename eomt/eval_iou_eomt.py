@@ -189,8 +189,6 @@ def main():
 
     for step, batch in enumerate(loader):
 
-        print(step)
-
         images, targets = batch
 
         image = images[0].unsqueeze(0)
