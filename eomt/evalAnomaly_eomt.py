@@ -256,8 +256,8 @@ def main():
         mask_logits = result[0][-1] #last layer mask logits
         class_logits = result[1][-1] #last layer class logits 
 
-        H=512
-        W=1024
+        H=640
+        W=640
         target_size = (H, W) #TO DO: chek size with config model
 
         # masks upsampling
