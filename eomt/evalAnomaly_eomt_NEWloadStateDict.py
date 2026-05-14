@@ -51,7 +51,7 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 
 NUM_CHANNELS = 3
-NUM_CLASSES = 20
+NUM_CLASSES = 19
 
 # gpu training specific
 torch.backends.cudnn.deterministic = True
