@@ -98,7 +98,7 @@ def load_eomt(weightspath, device):
 
     encoder = ViT(
         img_size=(1024, 1024),
-        patch_size=14,
+        patch_size=16,
         backbone_name="vit_base_patch14_reg4_dinov2",
     )
 
@@ -236,10 +236,14 @@ def main(args):
     # LOOP
     # =====================================================
 
-    for step, (images, targets) in enumerate(loader):
+    for step, batch in enumerate(loader):
+
+        images, targets = batch
+
+        image = images[0]
 
         if not args.cpu:
-            images = images.cuda()
+            image = image.cuda()
 
         target = targets[0]
 
@@ -252,9 +256,9 @@ def main(args):
             .cpu()
         )
 
-        # =================================================
+        # =============================================
         # DEBUG GT
-        # =================================================
+        # =============================================
 
         if step == 0:
 
@@ -268,17 +272,13 @@ def main(args):
 
             print("==========================================")
 
-        # =================================================
+        # =============================================
         # FORWARD
-        # =================================================
+        # =============================================
 
         with torch.no_grad():
 
-            outputs = model(images)
-
-        # =================================================
-        # OUTPUTS
-        # =================================================
+            outputs = model(image.unsqueeze(0))
 
         mask_logits = outputs[0][-1]
         class_logits = outputs[1][-1]
@@ -303,9 +303,9 @@ def main(args):
 
             print("==============================================")
 
-        # =================================================
+        # =============================================
         # QUERY -> PIXEL
-        # =================================================
+        # =============================================
 
         mask_probs = torch.sigmoid(mask_logits)
 
@@ -337,20 +337,12 @@ def main(args):
         # remove void
         pixel_logits = pixel_logits[:, :-1]
 
-        # =================================================
-        # PREDICTION
-        # =================================================
-
         prediction = pixel_logits.max(1)[1]
 
         prediction = prediction.unsqueeze(1).cpu()
 
-        # =================================================
-        # DEBUG PRED
-        # =================================================
-
         if step == 0:
-
+            
             print("\n================ PRED DEBUG ================")
 
             print("Prediction shape:")
@@ -360,10 +352,6 @@ def main(args):
             print(torch.unique(prediction))
 
             print("============================================")
-
-        # =================================================
-        # IOU
-        # =================================================
 
         iouEvalVal.addBatch(
             prediction,
