@@ -53,11 +53,13 @@ def extract_state_dict(checkpoint):
     for k in list(sd.keys())[:50]:
         print(k)
 
+    return checkpoint
+
 
 def load_my_state_dict(model, state_dict):
 
     own_state = model.state_dict()
-
+    missing = []
     loaded = 0
 
     for name, param in state_dict.items():
@@ -70,8 +72,11 @@ def load_my_state_dict(model, state_dict):
             if own_state[name].shape == param.shape:
                 own_state[name].copy_(param)
                 loaded += 1
+            else:
+                missing.append(name)
 
     print(f"Loaded {loaded} parameters")
+    print(f"Missing {len(missing)} parameters")
 
     return model
 
