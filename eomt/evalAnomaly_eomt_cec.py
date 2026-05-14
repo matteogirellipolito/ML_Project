@@ -193,27 +193,44 @@ def main():
          Mat_Mask=torch.flatten(input=mask_probs, start_dim=2)
 
          pixel_logits=torch.matmul(Mat_Class, Mat_Mask)
-         pixel_logits = pixel_logits.unflatten(2, target_size) #return to H x W map from H*W vector
-         
-         #################
-         pixel_logits = pixel_logits.squeeze(0)
-         # RbA - calcolato prima della conversione a numpy
-         anomaly_result_Rba = -torch.sum(torch.tanh(pixel_logits), dim=0).cpu().numpy()
-         #################
+         pixel_logits = pixel_logits.unflatten(2, (H, W)) #return to H x W map from H*W vector
+         pixel_logits = pixel_logits.squeeze(0) #loose Batch size dimension
+         pixel_logits = pixel_logits[:-1, :, :] #remove last class
         
-         pixel_logits = pixel_logits.squeeze(0).cpu().numpy() #loose Batch size dimension
+
+         # pixel probabilities
+         pixel_probs = torch.softmax(pixel_logits, dim=0)
+
+         pixel_probs_np = pixel_probs.cpu().numpy()
+
+         pixel_logits_np = pixel_logits.cpu().numpy()
 
          #evaluation scores
-         #pixel_probs=torch.softmax(pixel_logits.data.cpu(), dim=0)
-         known_class_probs = pixel_logits[:-1, :, :]
-         
-         anomaly_result_MSP= 1.0 - np.max(known_class_probs, axis=0)
 
-         anomaly_result_MaxLogit=-np.max(known_class_probs, axis=0)
+         anomaly_result_MSP = (
+            1.0 - np.max(pixel_probs_np, axis=0)
+        )
 
-         anomaly_result_Entropy = -np.sum(known_class_probs * np.log(known_class_probs + 1e-9), axis=0)       
+         anomaly_result_MaxLogit = (
+            -np.max(pixel_logits_np, axis=0)
+        )
 
-      
+         anomaly_result_Entropy = (
+            -np.sum(
+                pixel_probs_np *
+                np.log(pixel_probs_np + 1e-9),
+                axis=0
+            )
+        )
+
+         anomaly_result_Rba = (
+            -torch.sum(
+                torch.tanh(pixel_logits.cpu()),
+                dim=0
+            ).numpy()
+        )
+
+
          # GESTIONE GROUND TRUTH 
          pathGT = path.replace("images", "labels_masks")    
          #anomaly_result_rba = - torch.sum( torch.tanh(pixel_logits.data.cpu()), dim = 0) 
