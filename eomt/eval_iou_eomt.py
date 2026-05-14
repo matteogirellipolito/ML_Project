@@ -34,13 +34,24 @@ NUM_CLASSES = 20
 
 def extract_state_dict(checkpoint):
 
+    checkpoint = torch.load(
+    "/content/drive/MyDrive/ML_Project/eomt_cityscapes.bin",
+    map_location="cpu"
+)
+
+    print(checkpoint.keys())
+
     if "state_dict" in checkpoint:
-        return checkpoint["state_dict"]
+        sd = checkpoint["state_dict"]
+    elif "model" in checkpoint:
+        sd = checkpoint["model"]
+    else:
+        sd = checkpoint
 
-    if "model" in checkpoint:
-        return checkpoint["model"]
+    print("NUM KEYS:", len(sd))
 
-    return checkpoint
+    for k in list(sd.keys())[:50]:
+        print(k)
 
 
 def load_my_state_dict(model, state_dict):
