@@ -16,7 +16,7 @@ from sklearn.metrics import roc_auc_score, roc_curve, auc, precision_recall_curv
 from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 import warnings
 import importlib
-
+from scipy.special import softmax
 import torch.nn.functional as F
 
 seed = 42
