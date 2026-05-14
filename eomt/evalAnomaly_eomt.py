@@ -59,13 +59,13 @@ torch.backends.cudnn.benchmark = True
 
 # image preprocessing
 input_transform = Compose([
-    Resize((512, 1024), Image.BILINEAR),
+    Resize((640, 640), Image.BILINEAR),
     ToTensor(),
         # Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]), # Standard ImageNet/DINO
 ])
 
 target_transform = Compose([
-    Resize((512, 1024), Image.NEAREST),
+    Resize((640, 640), Image.NEAREST),
 ])
 
 
