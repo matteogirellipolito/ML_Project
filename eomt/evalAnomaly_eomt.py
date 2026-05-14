@@ -1,21 +1,47 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+
 import os
 import cv2
 import yaml
 import glob
 import torch
 import random
-from PIL import Image
-import numpy as np
-from models.eomt import EoMT
-from models.vit import ViT
-import os.path as osp
-from argparse import ArgumentParser
-from ood_metrics import fpr_at_95_tpr, calc_metrics, plot_roc, plot_pr,plot_barcode
-from sklearn.metrics import roc_auc_score, roc_curve, auc, precision_recall_curve, average_precision_score
-from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 import warnings
 import importlib
+import numpy as np
+import os.path as osp
+
+from PIL import Image
+from argparse import ArgumentParser
+
+from models.eomt import EoMT
+from models.vit import ViT
+
+from ood_metrics import (
+    fpr_at_95_tpr,
+    calc_metrics,
+    plot_roc,
+    plot_pr,
+    plot_barcode,
+)
+
+from sklearn.metrics import (
+    roc_auc_score,
+    roc_curve,
+    auc,
+    precision_recall_curve,
+    average_precision_score,
+)
+
+from torchvision.transforms import (
+    Compose,
+    Resize,
+    ToTensor,
+    Normalize,
+)
+
+import torch.nn.functional as F
+
 
 seed = 42
 
@@ -32,124 +58,194 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = True
 
 # image preprocessing
-
 input_transform = Compose([
-    Resize((512, 1024), Image.BILINEAR), # EoMT Giant usa solitamente 1280
+    Resize((1024, 1024), Image.BILINEAR),
     ToTensor(),
-    # Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]), # Standard ImageNet/DINO
+        # Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]), # Standard ImageNet/DINO
 ])
 
-target_transform = Compose(
-    [
-        Resize((512, 1024), Image.NEAREST),
-    ]
-)
+target_transform = Compose([
+    Resize((512, 1024), Image.NEAREST),
+])
 
 
-# CHIEDERE COME CARICARE MODELLO E CHECKPOINTS
-##########################################################################################
-##########################################################################################
+## MODEL LOADING 
 
-# load custom state dict
 def load_my_state_dict(model, state_dict):
-    own_state = model.state_dict()
+
+    model_state = model.state_dict()
+
+    loaded_keys = []
+    skipped_keys = []
+
     for name, param in state_dict.items():
-        if name not in own_state:
-            if name.startswith("module."):
-                own_state[name.split("module.")[-1]].copy_(param)
-            else:
-                print(name, " not loaded")
-                continue
-        else:
-            own_state[name].copy_(param)
+
+        # remove DataParallel prefix
+        if name.startswith("module."):
+            name = name[len("module."):]
+
+        if name not in model_state:
+            skipped_keys.append(name)
+            continue
+
+        if model_state[name].shape != param.shape:
+            print(
+                f"Shape mismatch for {name}: "
+                f"{param.shape} vs {model_state[name].shape}"
+            )
+            skipped_keys.append(name)
+            continue
+
+        model_state[name].copy_(param)
+        loaded_keys.append(name)
+
+    print(f"\nLoaded keys: {len(loaded_keys)}")
+    print(f"Skipped keys: {len(skipped_keys)}")
+
+    if len(skipped_keys) > 0:
+        print("\nFirst skipped keys:")
+        for k in skipped_keys[:20]:
+            print(k)
+
     return model
-
-
 
 # extract state_dict from checkpoint 
 def extract_state_dict(checkpoint):
-    if "state_dict" in checkpoint:
-        return checkpoint["state_dict"]
 
-    if "model" in checkpoint:
-        return checkpoint["model"]
+    if isinstance(checkpoint, dict):
+
+        if "state_dict" in checkpoint:
+            return checkpoint["state_dict"]
+
+        if "model" in checkpoint:
+            return checkpoint["model"]
 
     return checkpoint
 
 # funtion to load eomt model
-
 def load_eomt(args, device):
-    
-    yaml_path = "eomt_base_640_2x.yaml" 
-    with open(yaml_path, 'r') as f: #TO dO: impostare yaml_path
+
+    yaml_path = osp.join(args.loadConfigDir, args.loadConfig)
+
+    with open(yaml_path, "r") as f:
         config = yaml.safe_load(f)
 
-    print(f"Caricamento configurazione da: {yaml_path}")
-
+    print(f"Loading config from: {yaml_path}")
     
-    
-    encoder = ViT(
-        img_size=(640, 640), #TO DO: check con H,W upscaling line 165
-        patch_size=14,
-        backbone_name="vit_base_patch14_reg4_dinov2",  
+    network_cfg = (
+        config["model"]
+        ["init_args"]
+        ["network"]
+        ["init_args"]
     )
 
-    
+    encoder_cfg = (
+        network_cfg
+        ["encoder"]
+        ["init_args"]
+    )
+
+    backbone_name = encoder_cfg["backbone_name"]
+
+    num_queries = network_cfg["num_q"]
+
+    num_blocks = network_cfg["num_blocks"]
+
+    img_size=(1024, 1024) #or (512, 1024) ????
+
+    print(f"Backbone: {backbone_name}")
+    print(f"Num queries: {num_queries}")
+    print(f"Num blocks: {num_blocks}")
+
+    encoder = ViT(
+        img_size=img_size,
+        patch_size=16,
+        backbone_name=backbone_name,
+    )
+
     model = EoMT(
         encoder=encoder,
         num_classes=NUM_CLASSES,
-        num_q=100,
-        num_blocks=3,  #TO DO: check 3 o 4??
+        num_q=num_queries,
+        num_blocks=num_blocks,
         masked_attn_enabled=True,
     ).to(device)
 
-    
-    state_dict_path = "/content/drive/MyDrive/CourseProjectAnomaly/eomt_cityscapes.bin"
+    state_dict_path = args.loadWeights
 
-    # 5. Carica i pesi
-    checkpoint = torch.load(state_dict_path, map_location=device, weights_only=True)
+    print(f"Loading checkpoint from: {state_dict_path}")
+
+    checkpoint = torch.load(
+        state_dict_path,
+        map_location=device
+    )
+
     checkpoint = extract_state_dict(checkpoint)
+
     model = load_my_state_dict(model, checkpoint)
 
     model.eval()
+
     return model
-##########################################################################################
-##########################################################################################
+
+
+#MAIN
 
 def main():
+
     parser = ArgumentParser()
+
     parser.add_argument(
         "--input",
         default="/home/shyam/Mask2Former/unk-eval/RoadObsticle21/images/*.webp",
         nargs="+",
-        help="A list of space separated input images; "
-        "or a single glob pattern such as 'directory/*.jpg'",
-    )  
-    parser.add_argument('--loadDir',default="../eomt")
+        help=(
+            "A list of space separated input images; "
+            "or a single glob pattern such as 'directory/*.jpg'"
+        ),
+    )
+
+    parser.add_argument('--loadDir', default="../eomt")
     parser.add_argument('--loadModel', default="eomt.py")
-    parser.add_argument('--subset', default="val")  #can be val or train (must have labels)
+
+    parser.add_argument('--loadConfigDir', default='../eomt/configs/dinov2/cityscapes/semantic/')
+    parser.add_argument('--loadConfig', default='eomt_base_640.yaml')
+    parser.add_argument('--loadWeights',default='/content/drive/MyDrive/eomt_cityscapes.bin')
+
+    parser.add_argument('--subset', default="val")
+
     parser.add_argument('--datadir', default="/home/shyam/ViT-Adapter/segmentation/data/cityscapes/")
+
     parser.add_argument('--num-workers', type=int, default=4)
     parser.add_argument('--batch-size', type=int, default=1)
+
     parser.add_argument('--cpu', action='store_true')
+
     args = parser.parse_args()
 
     anomaly_score_MSP_list = []
     anomaly_score_MaxLogit_list = []
     anomaly_score_Entropy_list = []
     anomaly_score_Rba_list = []
+
     ood_gts_list = []
 
     if not os.path.exists('results.txt'):
         open('results.txt', 'w').close()
+
     file = open('results.txt', 'a')
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
+    )
 
-    ##############################################
-    model = load_eomt(args, device) # caricamento pesi e modello??????????????
-    ##############################################
+    print(f"Using device: {device}")
 
+    
+    model = load_eomt(args, device)
+
+    
+    #inference loop
     for path in glob.glob(os.path.expanduser(str(args.input[0]))):
         print(path)
         images = input_transform((Image.open(path).convert('RGB'))).unsqueeze(0).float().cuda()
@@ -160,25 +256,26 @@ def main():
         mask_logits = result[0][-1] #last layer mask logits
         class_logits = result[1][-1] #last layer class logits 
 
-        H=256
-        W=512
+        H=512
+        W=1024
         target_size = (H, W) #TO DO: chek size with config model
 
-        # upsampling
-        mask_logits_upsampled = F.interpolate(
+        # masks upsampling
+        mask_logits = F.interpolate(
             mask_logits,
             size=target_size,
             mode="bilinear",
             align_corners=False
         )
 
-        # mask probabilities
+         # mask probabilities
         mask_probs = torch.sigmoid(mask_logits)
 
         # class probabilities
         class_probs = torch.softmax(class_logits, dim=-1) #-1 is the class dimension class_logits.shape=[B,Q,C+1]
 
-        #final pixel-wise segmentation
+
+        #pixel-wise segmentation
         Mat_Class=class_probs.transpose(1,2)
         Mat_Mask=torch.flatten(input=mask_probs, start_dim=2)
 
@@ -186,60 +283,91 @@ def main():
         pixel_logits = pixel_logits.unflatten(2, (H, W)) #return to H x W map from H*W vector
         pixel_logits = pixel_logits.squeeze(0) #loose Batch size dimension
 
+        
+
+        # pixel probabilities
+        pixel_probs = torch.softmax(pixel_logits, dim=0)
+
+        pixel_probs_np = pixel_probs.cpu().numpy()
+
+        pixel_logits_np = pixel_logits.cpu().numpy()
+
         #evaluation scores
-        pixel_probs=torch.softmax(pixel_logits.data.cpu(), dim=0)
 
-        anomaly_result_MSP= 1.0 - np.max(probs_tensor.numpy(), axis=0)
+        anomaly_result_MSP = (
+            1.0 - np.max(pixel_probs_np, axis=0)
+        )
 
-        anomaly_result_MaxLogit=-np.max(pixel_logits, axis=0)
+        anomaly_result_MaxLogit = (
+            -np.max(pixel_logits_np, axis=0)
+        )
 
-        anomaly_result_Entropy = -np.sum(probs * np.log(probs + 1e-9), axis=0)       
+        anomaly_result_Entropy = (
+            -np.sum(
+                pixel_probs_np *
+                np.log(pixel_probs_np + 1e-9),
+                axis=0
+            )
+        )
 
-        #anomaly_result_Rba=
-        #TO DO: Rba score         
-        
-        pathGT = path.replace("images", "labels_masks")    
-        anomaly_result_rba = - torch.sum( torch.tanh(pixel_logits.data.cpu()), dim = 0) 
-                    
-        
+        anomaly_result_Rba = (
+            -torch.sum(
+                torch.tanh(pixel_logits.cpu()),
+                dim=0
+            ).numpy()
+        )
+
+
+        #Ground Truth
+        pathGT = path.replace("images", "labels_masks")
+
         if "RoadObsticle21" in pathGT:
-           pathGT = pathGT.replace("webp", "png")
+            pathGT = pathGT.replace("webp", "png")
         if "fs_static" in pathGT:
-           pathGT = pathGT.replace("jpg", "png")                
+            pathGT = pathGT.replace("jpg", "png")
         if "RoadAnomaly" in pathGT:
-           pathGT = pathGT.replace("jpg", "png")  
+            pathGT = pathGT.replace("jpg", "png")
 
         mask = Image.open(pathGT)
         mask = target_transform(mask)
         ood_gts = np.array(mask)
 
+        # dataset specific processing
+
         if "RoadAnomaly" in pathGT:
-            ood_gts = np.where((ood_gts==2), 1, ood_gts)
+            ood_gts = np.where((ood_gts == 2), 1, ood_gts)
         if "LostAndFound" in pathGT:
-            ood_gts = np.where((ood_gts==0), 255, ood_gts)
-            ood_gts = np.where((ood_gts==1), 0, ood_gts)
-            ood_gts = np.where((ood_gts>1)&(ood_gts<201), 1, ood_gts)
-
+            ood_gts = np.where((ood_gts == 0), 255, ood_gts)
+            ood_gts = np.where((ood_gts == 1), 0, ood_gts)
+            ood_gts = np.where(
+                (ood_gts > 1) & (ood_gts < 201),
+                1,
+                ood_gts
+            )
         if "Streethazard" in pathGT:
-            ood_gts = np.where((ood_gts==14), 255, ood_gts)
-            ood_gts = np.where((ood_gts<20), 0, ood_gts)
-            ood_gts = np.where((ood_gts==255), 1, ood_gts)
+            ood_gts = np.where((ood_gts == 14), 255, ood_gts)
+            ood_gts = np.where((ood_gts < 20), 0, ood_gts)
+            ood_gts = np.where((ood_gts == 255), 1, ood_gts)
 
-        if 1 not in np.unique(ood_gts):
-            continue           
+        if 1 not in np.unique(ood_gts):    # skip images without anomalies
+            continue
+
+        # store
         else:
              ood_gts_list.append(ood_gts)
              anomaly_score_MSP_list.append(anomaly_result_MSP)
              anomaly_score_MaxLogit_list.append(anomaly_result_MaxLogit)
              anomaly_score_Entropy_list.append(anomaly_result_Entropy)
-             #anomaly_score_Rba_list.append(anomaly_result_Rba)
+             anomaly_score_Rba_list.append(anomaly_result_Rba)
         del result, anomaly_result_MSP, anomaly_result_MaxLogit, anomaly_result_Entropy ,ood_gts, mask #, anomaly_result_Rba
         torch.cuda.empty_cache()
 
-    file.write( "\n")
+    file.write("\n")
+
+  # metrics evaluation
 
     def eval_metrics(ood_gts_list, anomaly_score_list):
-    
+
         ood_gts = np.array(ood_gts_list)
         anomaly_scores = np.array(anomaly_score_list)
 
@@ -267,26 +395,48 @@ def main():
     [prc_auc_Entropy, fpr_Entropy] = eval_metrics(ood_gts_list, anomaly_score_Entropy_list)
     [prc_auc_Rba, fpr_Rba] = eval_metrics(ood_gts_list, anomaly_score_Rba_list)
 
-    print(f'AUPRC logit score: {prc_auc_MaxLogit*100.0}')
-    print(f'FPR@TPR95 logit: {fpr_MaxLogit*100.0}')
+    print(f'AUPRC MSP score: {prc_auc_MSP*100.0}')
+    print(f'FPR@TPR95 MSP: {fpr_MSP*100.0}')
 
-    print(f'AUPRC softmax score: {prc_auc_MSP*100.0}')
-    print(f'FPR@TPR95 softmax: {fpr_MSP*100.0}')
+    print(f'AUPRC MaxLogit score: {prc_auc_MaxLogit*100.0}')
+    print(f'FPR@TPR95 MaxLogit: {fpr_MaxLogit*100.0}')
 
-    print(f'AUPRC entropy score: {prc_auc_Entropy*100.0}')
-    print(f'FPR@TPR95 entropy: {fpr_Entropy*100.0}')
+    print(f'AUPRC Entropy score: {prc_auc_Entropy*100.0}')
+    print(f'FPR@TPR95 Entropy: {fpr_Entropy*100.0}')
 
-    print(f'AUPRC rba score: {prc_auc_Rba*100.0}')
-    print(f'FPR@TPR95 rba: {fpr_Rba*100.0}')
+    print(f'AUPRC Rba score: {prc_auc_Rba*100.0}')
+    print(f'FPR@TPR95 Rba: {fpr_Rba*100.0}')
 
 
-    file.write(('      AUPRC softmax score:' + str(prc_auc_MSP*100.0) + '   FPR@TPR95 softmax:' + str(fpr_MSP*100.0) +
-                '\n    AUPRC logit score:' + str(prc_auc_MaxLogit*100.0) + '   FPR@TPR95 logit:' + str(fpr_MaxLogit*100.0)'
-                '\n    AUPRC entropy score:' + str(prc_auc_Entropy*100.0) + '   FPR@TPR95 entropy:' + str(fpr_Entropy*100.0) +
-                '\n    AUPRC rba score:' + str(prc_auc_Rba*100.0) + '   FPR@TPR95 rba:' + str(fpr_Rba*100.0)
-                ))
+  
+    file.write(
+        (
+            'AUPRC softmax score: '
+            + str(prc_auc_MSP * 100.0)
+            + '   FPR@TPR95 softmax: '
+            + str(fpr_MSP * 100.0)
+
+            + '\nAUPRC logit score: '
+            + str(prc_auc_MaxLogit * 100.0)
+            + '   FPR@TPR95 logit: '
+            + str(fpr_MaxLogit * 100.0)
+
+            + '\nAUPRC entropy score: '
+            + str(prc_auc_Entropy * 100.0)
+            + '   FPR@TPR95 entropy: '
+            + str(fpr_Entropy * 100.0)
+
+            + '\nAUPRC rba score: '
+            + str(prc_auc_Rba * 100.0)
+            + '   FPR@TPR95 rba: '
+            + str(fpr_Rba * 100.0)
+
+            + '\n'
+        )
+    )
 
     file.close()
+
 
 if __name__ == '__main__':
     main()
