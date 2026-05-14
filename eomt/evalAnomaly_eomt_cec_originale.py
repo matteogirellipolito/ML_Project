@@ -211,7 +211,9 @@ def main():
 
          anomaly_result_MaxLogit=-np.max(known_class_probs, axis=0)
 
-         anomaly_result_Entropy = -np.sum(known_class_probs * np.log(known_class_probs + 1e-9), axis=0)       
+         #anomaly_result_Entropy = -np.sum(known_class_probs * np.log(known_class_probs + 1e-9), axis=0) 
+         probs_entropy = softmax(known_class_probs, axis=0)
+         anomaly_result_Entropy = np.sum(-probs_entropy * np.log(probs_entropy + 1e-9), axis=0) 
 
       
          # GESTIONE GROUND TRUTH 
