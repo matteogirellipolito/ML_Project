@@ -57,6 +57,7 @@ def load_my_state_dict(model, state_dict):
             continue
 
         if own_state[name].shape != param.shape:
+
             mismatch.append(
                 (
                     original_name,
@@ -64,16 +65,71 @@ def load_my_state_dict(model, state_dict):
                     own_state[name].shape
                 )
             )
+
             continue
 
         own_state[name].copy_(param)
 
         loaded += 1
 
+    # =====================================================
+    # FIND REAL MISSING MODEL KEYS
+    # =====================================================
+
+    checkpoint_keys = set()
+
+    for k in state_dict.keys():
+
+        if k.startswith("network."):
+            k = k.replace("network.", "")
+
+        checkpoint_keys.add(k)
+
+    model_keys = set(own_state.keys())
+
+    real_missing_model_keys = sorted(
+        list(model_keys - checkpoint_keys)
+    )
+
+    # =====================================================
+    # PRINT
+    # =====================================================
+
     print("\n================ MODEL LOAD ================")
+
     print(f"Loaded params: {loaded}")
-    print(f"Missing keys: {len(missing)}")
+
+    print(f"Missing checkpoint keys: {len(missing)}")
+
+    print(f"Missing model keys: {len(real_missing_model_keys)}")
+
     print(f"Shape mismatches: {len(mismatch)}")
+
+    # =====================================================
+    # MISSING IN CHECKPOINT
+    # =====================================================
+
+    if len(missing) > 0:
+
+        print("\n--- CHECKPOINT KEYS NOT USED ---")
+
+        for k in missing:
+            print(k)
+
+    # =====================================================
+    # MISSING IN MODEL
+    # =====================================================
+
+    if len(real_missing_model_keys) > 0:
+
+        print("\n--- MODEL KEYS MISSING FROM CHECKPOINT ---")
+
+        for k in real_missing_model_keys:
+            print(k)
+
+    # =====================================================
+    # SHAPE MISMATCHES
+    # =====================================================
 
     if len(mismatch) > 0:
 
@@ -95,13 +151,13 @@ def load_my_state_dict(model, state_dict):
 # MODEL
 # =========================================================
 
-def load_eomt(weightspath, device):
+def load_eomt(weightspath, device, num_blocks):
 
     print("Creating ViT backbone...")
 
     encoder = ViT(
-        img_size=(512, 1024),
-        patch_size=16,
+        img_size=(640, 640),
+        patch_size=14,
         backbone_name="vit_base_patch14_reg4_dinov2",
     )
 
@@ -111,7 +167,7 @@ def load_eomt(weightspath, device):
         encoder=encoder,
         num_classes=19,
         num_q=100,
-        num_blocks=3,
+        num_blocks=num_blocks,
         masked_attn_enabled=False,
     )
 
@@ -203,7 +259,8 @@ def main(args):
 
     model = load_eomt(
         args.loadWeights,
-        device
+        device,
+        args.num_blocks
     )
 
     # =====================================================
@@ -216,32 +273,27 @@ def main(args):
         path=args.datadir,
         batch_size=1,
         num_workers=args.num_workers,
-        img_size=(512, 1024),
+        img_size=(640,640),
     )
 
     datamodule.setup()
 
     loader = datamodule.val_dataloader()
 
-    # =====================================================
-    # RESIZE LIKE ERFNET
+   # =====================================================
+    # RESIZE
     # =====================================================
 
     image_resize = Resize(
-        (1024, 1024),
+        (640, 640),
         interpolation=InterpolationMode.BILINEAR
     )
 
     target_resize = Resize(
-        (1024, 1024),
+        (640, 640),
         interpolation=InterpolationMode.NEAREST
     )
-
-    prediction_resize = Resize(
-        (256, 256),
-        interpolation=InterpolationMode.NEAREST
-    )
-
+    
     print(
         f"\nFound {len(datamodule.cityscapes_val_dataset)} validation images"
     )
@@ -382,23 +434,23 @@ def main(args):
 
         prediction = prediction.long().cpu()
 
-        # =====================================================
-        # RESIZE GT TO PRED SIZE
-        # =====================================================
-
-        semantic_gt = prediction_resize(semantic_gt)
-
         if step == 0:
-            
-            print("\n================ PRED DEBUG ================")
+
+            print("\n================ FINAL DEBUG ================")
 
             print("Prediction shape:")
             print(prediction.shape)
 
-            print("Prediction unique classes:")
+            print("GT shape:")
+            print(semantic_gt.shape)
+
+            print("\nPrediction unique:")
             print(torch.unique(prediction))
 
-            print("============================================")
+            print("\nGT unique:")
+            print(torch.unique(semantic_gt))
+
+            print("=============================================")
 
         iouEvalVal.addBatch(
             prediction,
@@ -484,12 +536,18 @@ if __name__ == '__main__':
     parser.add_argument(
         '--num-workers',
         type=int,
-        default=4
+        default=2
     )
 
     parser.add_argument(
         '--cpu',
         action='store_true'
+    )
+
+    parser.add_argument(
+        '--num-blocks',
+        type=int,
+        default=3
     )
 
     main(parser.parse_args())
