@@ -100,7 +100,7 @@ def load_eomt(weightspath, device):
     print("Creating ViT backbone...")
 
     encoder = ViT(
-        img_size=(512, 512),
+        img_size=(512, 1024),
         patch_size=16,
         backbone_name="vit_base_patch14_reg4_dinov2",
     )
@@ -216,7 +216,7 @@ def main(args):
         path=args.datadir,
         batch_size=1,
         num_workers=args.num_workers,
-        img_size=(512, 512), # img_size=(512,1024)
+        img_size=(512, 1024),
     )
 
     datamodule.setup()
