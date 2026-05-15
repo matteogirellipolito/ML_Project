@@ -236,6 +236,11 @@ def main(args):
         interpolation=InterpolationMode.NEAREST
     )
 
+    prediction_resize = Resize(
+        (256, 256),
+        interpolation=InterpolationMode.NEAREST
+    )
+
     print(
         f"\nFound {len(datamodule.cityscapes_val_dataset)} validation images"
     )
@@ -367,6 +372,12 @@ def main(args):
         prediction = pixel_logits.max(1)[1]
 
         prediction = prediction.unsqueeze(1).cpu()
+
+        # =====================================================
+        # RESIZE GT TO PRED SIZE
+        # =====================================================
+
+        semantic_gt = prediction_resize(semantic_gt)
 
         if step == 0:
             
