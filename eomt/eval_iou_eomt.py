@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 from torchvision.transforms import ToPILImage, ToTensor, Resize
 from torchvision.transforms import InterpolationMode
+from torchvision.transforms.functional import resize
 import os
 import time
 import random
@@ -215,7 +216,7 @@ def main(args):
         path=args.datadir,
         batch_size=1,
         num_workers=args.num_workers,
-        img_size=(1024, 1024),
+        img_size=(512, 512), # img_size=(512,1024)
     )
 
     datamodule.setup()
@@ -371,7 +372,15 @@ def main(args):
 
         prediction = pixel_logits.max(1)[1]
 
-        prediction = prediction.unsqueeze(1).cpu()
+        prediction = prediction.unsqueeze(1).float()
+
+        prediction = resize(
+            prediction,
+            size=semantic_gt.shape[-2:],
+            interpolation=InterpolationMode.NEAREST
+        )
+
+        prediction = prediction.long().cpu()
 
         # =====================================================
         # RESIZE GT TO PRED SIZE
