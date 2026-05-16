@@ -43,7 +43,10 @@ def load_my_state_dict(model, state_dict):
 
     loaded = 0
 
-    print("\n================ LOAD DEBUG ================\n")
+    missing_checkpoint_keys = []
+    mismatch_keys = []
+
+    print("\n================ CHECKPOINT DEBUG ================\n")
 
     for name, param in state_dict.items():
 
@@ -53,26 +56,158 @@ def load_my_state_dict(model, state_dict):
             name = name.replace("network.", "")
 
         if "criterion.empty_weight" in name:
+
+            print(f"[IGNORED LOSS BUFFER] {original_name}")
+
             continue
 
+        # =====================================================
+        # KEY NOT FOUND
+        # =====================================================
+
         if name not in own_state:
-            print(f"[NOT FOUND] {original_name}")
+
+            missing_checkpoint_keys.append(original_name)
+
+            print(f"\n[CHECKPOINT KEY NOT USED]")
+            print(original_name)
+
             continue
+
+        # =====================================================
+        # SHAPE MISMATCH
+        # =====================================================
 
         if own_state[name].shape != param.shape:
 
+            mismatch_keys.append(
+                (
+                    original_name,
+                    param.shape,
+                    own_state[name].shape
+                )
+            )
+
             print(f"\n[SHAPE MISMATCH]")
-            print(name)
-            print(f"ckpt : {param.shape}")
-            print(f"model: {own_state[name].shape}")
+            print(original_name)
+
+            print(f"checkpoint shape : {param.shape}")
+            print(f"model shape      : {own_state[name].shape}")
+
+            # =================================================
+            # REASONING
+            # =================================================
+
+            if "pos_embed" in name:
+
+                print(
+                    "Reason: positional embedding depends on image_size and patch_size"
+                )
+
+            elif "patch_embed" in name:
+
+                print(
+                    "Reason: patch embedding kernel depends on patch_size"
+                )
+
+            elif "class_head" in name:
+
+                print(
+                    "Reason: different number of semantic classes"
+                )
+
+            elif "mask_head" in name:
+
+                print(
+                    "Reason: decoder architecture mismatch"
+                )
+
+            else:
+
+                print(
+                    "Reason: architecture mismatch"
+                )
 
             continue
 
+        # =====================================================
+        # LOAD PARAM
+        # =====================================================
+
         own_state[name].copy_(param)
+
         loaded += 1
 
-    print(f"\nLoaded params: {loaded}")
-    print("\n============================================\n")
+    # =========================================================
+    # FIND MODEL KEYS MISSING IN CHECKPOINT
+    # =========================================================
+
+    checkpoint_keys = set()
+
+    for k in state_dict.keys():
+
+        if k.startswith("network."):
+            k = k.replace("network.", "")
+
+        checkpoint_keys.add(k)
+
+    model_keys = set(own_state.keys())
+
+    missing_model_keys = sorted(
+        list(model_keys - checkpoint_keys)
+    )
+
+    # =========================================================
+    # PRINT SUMMARY
+    # =========================================================
+
+    print("\n================ SUMMARY ================\n")
+
+    print(f"Loaded params: {loaded}")
+
+    print(f"\nCheckpoint keys not used: {len(missing_checkpoint_keys)}")
+
+    print(f"Model keys missing from checkpoint: {len(missing_model_keys)}")
+
+    print(f"Shape mismatches: {len(mismatch_keys)}")
+
+    # =========================================================
+    # MODEL KEYS MISSING
+    # =========================================================
+
+    if len(missing_model_keys) > 0:
+
+        print("\n========== MODEL KEYS WITHOUT WEIGHTS ==========\n")
+
+        for k in missing_model_keys:
+
+            print(k)
+
+            if "attn_mask_probs" in k:
+
+                print(
+                    " -> attention mask probabilities not found"
+                )
+
+            elif "upscale" in k:
+
+                print(
+                    " -> decoder upscale layer missing"
+                )
+
+            elif "class_head" in k:
+
+                print(
+                    " -> classification head mismatch"
+                )
+
+            else:
+
+                print(
+                    " -> generic missing parameter"
+                )
+
+    print("\n===============================================\n")
 
     return model
 
@@ -345,9 +480,31 @@ def main(args):
 
         try:
 
+            print("\nIOU INPUT DEBUG")
+
+            print("prediction shape:")
+            print(prediction.shape)
+
+            print("semantic_gt shape:")
+            print(semantic_gt.shape)
+
+            print("\nprediction dtype:")
+            print(prediction.dtype)
+
+            print("semantic_gt dtype:")
+            print(semantic_gt.dtype)
+
+            print("\nprediction min/max:")
+            print(prediction.min())
+            print(prediction.max())
+
+            print("\nsemantic_gt min/max:")
+            print(semantic_gt.min())
+            print(semantic_gt.max())
+
             iouEvalVal.addBatch(
-                prediction.squeeze(1),
-                semantic_gt.squeeze(1)
+                prediction,
+                semantic_gt
             )
 
         except Exception as e:
