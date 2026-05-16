@@ -1,12 +1,13 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torchvision.transforms import Resize, InterpolationMode
-from torchvision.transforms.functional import resize
-import time
 import random
+import time
 
 from argparse import ArgumentParser
+from torchvision.transforms import Resize
+from torchvision.transforms import InterpolationMode
+from torchvision.transforms.functional import resize
 
 from datasets.cityscapes_semantic import CityscapesSemantic
 
@@ -16,78 +17,11 @@ from models.vit import ViT
 from iouEval import iouEval, getColorEntry
 
 # =========================================================
-# SHARED LABEL SPACE
+# CONFIG
 # =========================================================
 
-IGNORE_INDEX = 255
-
-SHARED_CLASSES = [
-    "person",
-    "car",
-    "truck",
-    "bus",
-    "motorcycle",
-    "bicycle",
-    "traffic light",
-]
-
-CITYSCAPES_LABEL_TO_ID = {
-    "road": 0,
-    "sidewalk": 1,
-    "building": 2,
-    "wall": 3,
-    "fence": 4,
-    "pole": 5,
-    "traffic light": 6,
-    "traffic sign": 7,
-    "vegetation": 8,
-    "terrain": 9,
-    "sky": 10,
-    "person": 11,
-    "rider": 12,
-    "car": 13,
-    "truck": 14,
-    "bus": 15,
-    "train": 16,
-    "motorcycle": 17,
-    "bicycle": 18,
-}
-
-COCO_LABEL_TO_ID = {
-    "person": 0,
-    "bicycle": 1,
-    "car": 2,
-    "motorcycle": 3,
-    "bus": 5,
-    "truck": 7,
-    "traffic light": 9,
-}
-
-SHARED_NAME_TO_ID = {
-    name: idx for idx, name in enumerate(SHARED_CLASSES)
-}
-
-CITYSCAPES_TO_SHARED = {
-    CITYSCAPES_LABEL_TO_ID["person"]: SHARED_NAME_TO_ID["person"],
-    CITYSCAPES_LABEL_TO_ID["car"]: SHARED_NAME_TO_ID["car"],
-    CITYSCAPES_LABEL_TO_ID["truck"]: SHARED_NAME_TO_ID["truck"],
-    CITYSCAPES_LABEL_TO_ID["bus"]: SHARED_NAME_TO_ID["bus"],
-    CITYSCAPES_LABEL_TO_ID["motorcycle"]: SHARED_NAME_TO_ID["motorcycle"],
-    CITYSCAPES_LABEL_TO_ID["bicycle"]: SHARED_NAME_TO_ID["bicycle"],
-    CITYSCAPES_LABEL_TO_ID["traffic light"]: SHARED_NAME_TO_ID["traffic light"],
-}
-
-COCO_TO_SHARED = {
-    COCO_LABEL_TO_ID["person"]: SHARED_NAME_TO_ID["person"],
-    COCO_LABEL_TO_ID["car"]: SHARED_NAME_TO_ID["car"],
-    COCO_LABEL_TO_ID["truck"]: SHARED_NAME_TO_ID["truck"],
-    COCO_LABEL_TO_ID["bus"]: SHARED_NAME_TO_ID["bus"],
-    COCO_LABEL_TO_ID["motorcycle"]: SHARED_NAME_TO_ID["motorcycle"],
-    COCO_LABEL_TO_ID["bicycle"]: SHARED_NAME_TO_ID["bicycle"],
-    COCO_LABEL_TO_ID["traffic light"]: SHARED_NAME_TO_ID["traffic light"],
-}
-
-NUM_SHARED_CLASSES = len(SHARED_CLASSES)
+NUM_CLASSES = 20
+IMG_SIZE = (1024, 1024)
 
 # =========================================================
 # SEED
@@ -100,7 +34,7 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 
 # =========================================================
-# LOAD STATE DICT
+# LOAD CHECKPOINT
 # =========================================================
 
 def load_my_state_dict(model, state_dict):
@@ -108,8 +42,8 @@ def load_my_state_dict(model, state_dict):
     own_state = model.state_dict()
 
     loaded = 0
-    missing = []
-    mismatch = []
+
+    print("\n================ LOAD DEBUG ================\n")
 
     for name, param in state_dict.items():
 
@@ -118,75 +52,27 @@ def load_my_state_dict(model, state_dict):
         if name.startswith("network."):
             name = name.replace("network.", "")
 
+        if "criterion.empty_weight" in name:
+            continue
+
         if name not in own_state:
-            missing.append(original_name)
+            print(f"[NOT FOUND] {original_name}")
             continue
 
         if own_state[name].shape != param.shape:
 
-            mismatch.append(
-                (
-                    original_name,
-                    param.shape,
-                    own_state[name].shape
-                )
-            )
+            print(f"\n[SHAPE MISMATCH]")
+            print(name)
+            print(f"ckpt : {param.shape}")
+            print(f"model: {own_state[name].shape}")
 
             continue
 
         own_state[name].copy_(param)
-
         loaded += 1
 
-    checkpoint_keys = set()
-
-    for k in state_dict.keys():
-
-        if k.startswith("network."):
-            k = k.replace("network.", "")
-
-        checkpoint_keys.add(k)
-
-    model_keys = set(own_state.keys())
-
-    real_missing_model_keys = sorted(
-        list(model_keys - checkpoint_keys)
-    )
-
-    print("\n================ MODEL LOAD ================")
-
-    print(f"Loaded params: {loaded}")
-    print(f"Missing checkpoint keys: {len(missing)}")
-    print(f"Missing model keys: {len(real_missing_model_keys)}")
-    print(f"Shape mismatches: {len(mismatch)}")
-
-    if len(missing) > 0:
-
-        print("\n--- CHECKPOINT KEYS NOT USED ---")
-
-        for k in missing:
-            print(k)
-
-    if len(real_missing_model_keys) > 0:
-
-        print("\n--- MODEL KEYS MISSING FROM CHECKPOINT ---")
-
-        for k in real_missing_model_keys:
-            print(k)
-
-    if len(mismatch) > 0:
-
-        print("\n--- SHAPE MISMATCHES ---")
-
-        for name, ckpt_shape, model_shape in mismatch:
-
-            print(
-                f"{name}\n"
-                f"  checkpoint: {ckpt_shape}\n"
-                f"  model:      {model_shape}"
-            )
-
-    print("============================================\n")
+    print(f"\nLoaded params: {loaded}")
+    print("\n============================================\n")
 
     return model
 
@@ -194,13 +80,13 @@ def load_my_state_dict(model, state_dict):
 # MODEL
 # =========================================================
 
-def load_eomt(weightspath, device, num_blocks):
+def load_eomt(weightspath, device):
 
     print("Creating ViT backbone...")
 
     encoder = ViT(
-        img_size=(640, 640),
-        patch_size=14,
+        img_size=IMG_SIZE,
+        patch_size=16,
         backbone_name="vit_base_patch14_reg4_dinov2",
     )
 
@@ -210,7 +96,7 @@ def load_eomt(weightspath, device, num_blocks):
         encoder=encoder,
         num_classes=19,
         num_q=100,
-        num_blocks=num_blocks,
+        num_blocks=3,
         masked_attn_enabled=False,
     )
 
@@ -222,32 +108,8 @@ def load_eomt(weightspath, device, num_blocks):
         map_location="cpu"
     )
 
-    print("\nCheckpoint type:")
-    print(type(checkpoint))
-
-    if isinstance(checkpoint, dict):
-
-        print("\nCheckpoint keys:")
-        print(checkpoint.keys())
-
     if "state_dict" in checkpoint:
-
-        print("\nUsing checkpoint['state_dict']")
         checkpoint = checkpoint["state_dict"]
-
-    elif "model" in checkpoint:
-
-        print("\nUsing checkpoint['model']")
-        checkpoint = checkpoint["model"]
-
-    print("\nFirst 20 parameter keys:\n")
-
-    for i, k in enumerate(checkpoint.keys()):
-
-        print(k)
-
-        if i >= 20:
-            break
 
     model = load_my_state_dict(
         model,
@@ -283,44 +145,6 @@ def target_to_semantic(target):
     return semantic
 
 # =========================================================
-# REMAP TARGET TO SHARED SPACE
-# =========================================================
-
-def remap_target_to_shared(target):
-
-    shared = torch.ones_like(target) * IGNORE_INDEX
-
-    for src_id, dst_id in CITYSCAPES_TO_SHARED.items():
-
-        shared[target == src_id] = dst_id
-
-    return shared
-
-# =========================================================
-# REMAP LOGITS TO SHARED SPACE
-# =========================================================
-
-def remap_logits_to_shared(logits):
-
-    """
-    logits shape:
-    [19, H, W]
-    """
-
-    H, W = logits.shape[-2:]
-
-    shared_logits = torch.zeros(
-        (NUM_SHARED_CLASSES, H, W),
-        device=logits.device
-    )
-
-    for src_id, dst_id in CITYSCAPES_TO_SHARED.items():
-
-        shared_logits[dst_id] += logits[src_id]
-
-    return shared_logits
-
-# =========================================================
 # MAIN
 # =========================================================
 
@@ -332,42 +156,55 @@ def main(args):
 
     print("\nDEVICE:", device)
 
-    print("\nLoading EoMT...")
+    # =====================================================
+    # MODEL
+    # =====================================================
 
     model = load_eomt(
         args.loadWeights,
-        device,
-        args.num_blocks
+        device
     )
+
+    # =====================================================
+    # DATASET
+    # =====================================================
 
     print("\nCreating datamodule...")
 
     datamodule = CityscapesSemantic(
         path=args.datadir,
-        batch_size=1,
+        batch_size=16,
         num_workers=args.num_workers,
-        img_size=(640, 640),
+        img_size=IMG_SIZE,
     )
 
     datamodule.setup()
 
     loader = datamodule.val_dataloader()
 
-    image_resize = Resize(
-        (640, 640),
-        interpolation=InterpolationMode.BILINEAR
-    )
-
-    target_resize = Resize(
-        (640, 640),
-        interpolation=InterpolationMode.NEAREST
-    )
-
     print(
         f"\nFound {len(datamodule.cityscapes_val_dataset)} validation images"
     )
 
-    iouEvalVal = iouEval(NUM_SHARED_CLASSES)
+    # =====================================================
+    # RESIZE
+    # =====================================================
+
+    image_resize = Resize(
+        IMG_SIZE,
+        interpolation=InterpolationMode.BILINEAR
+    )
+
+    target_resize = Resize(
+        IMG_SIZE,
+        interpolation=InterpolationMode.NEAREST
+    )
+
+    # =====================================================
+    # IOU
+    # =====================================================
+
+    iouEvalVal = iouEval(NUM_CLASSES)
 
     start = time.time()
 
@@ -378,6 +215,8 @@ def main(args):
     for step, batch in enumerate(loader):
 
         images, targets = batch
+
+        print(f"\n================ STEP {step} ================\n")
 
         image = images[0]
 
@@ -390,33 +229,16 @@ def main(args):
 
         semantic_gt = target_to_semantic(target)
 
-        semantic_gt = semantic_gt.unsqueeze(0)
+        semantic_gt = semantic_gt.unsqueeze(0).float()
 
         semantic_gt = target_resize(semantic_gt)
 
         semantic_gt = semantic_gt.long()
 
-        # =====================================================
-        # REMAP GT TO SHARED LABEL SPACE
-        # =====================================================
-
-        semantic_gt = remap_target_to_shared(
-            semantic_gt
-        )
-
         semantic_gt = semantic_gt.unsqueeze(0).cpu()
 
-        if step == 0:
-
-            print("\n================ GT DEBUG ================")
-
-            print("GT shape:")
-            print(semantic_gt.shape)
-
-            print("GT unique classes:")
-            print(torch.unique(semantic_gt))
-
-            print("==========================================")
+        print("GT unique:")
+        print(torch.unique(semantic_gt))
 
         # =====================================================
         # FORWARD
@@ -429,25 +251,28 @@ def main(args):
         mask_logits = outputs[0][-1]
         class_logits = outputs[1][-1]
 
-        if step == 0:
+        print("\nmask_logits shape:")
+        print(mask_logits.shape)
 
-            print("\n================ OUTPUT DEBUG ================")
+        print("class_logits shape:")
+        print(class_logits.shape)
 
-            print("mask_logits shape:")
-            print(mask_logits.shape)
+        print("\nmask logits min/max:")
+        print(mask_logits.min().item())
+        print(mask_logits.max().item())
 
-            print("class_logits shape:")
-            print(class_logits.shape)
+        print("\nclass logits min/max:")
+        print(class_logits.min().item())
+        print(class_logits.max().item())
 
-            print("\nmask logits stats:")
-            print(mask_logits.min().item())
-            print(mask_logits.max().item())
+        # =====================================================
+        # NAN CHECK
+        # =====================================================
 
-            print("\nclass logits stats:")
-            print(class_logits.min().item())
-            print(class_logits.max().item())
+        print("\nNaN checks:")
 
-            print("==============================================")
+        print(torch.isnan(mask_logits).any())
+        print(torch.isnan(class_logits).any())
 
         # =====================================================
         # QUERY -> PIXEL
@@ -480,67 +305,65 @@ def main(args):
             (H, W)
         )
 
-        # remove void
         pixel_logits = pixel_logits[:, :-1]
 
-        # =====================================================
-        # RESIZE PIXEL LOGITS TO GT SIZE
-        # =====================================================
+        prediction = pixel_logits.max(1)[1]
 
-        pixel_logits = F.interpolate(
-            pixel_logits,
+        prediction = prediction.unsqueeze(1).float()
+
+        prediction = resize(
+            prediction,
             size=semantic_gt.shape[-2:],
-            mode="bilinear",
-            align_corners=False
+            interpolation=InterpolationMode.NEAREST
         )
-
-        # =====================================================
-        # REMAP TO SHARED SPACE
-        # =====================================================
-
-        shared_logits = remap_logits_to_shared(
-            pixel_logits[0]
-        )
-
-        prediction = shared_logits.argmax(0)
-
-        prediction = prediction.unsqueeze(0).unsqueeze(0)
 
         prediction = prediction.long().cpu()
 
-        if step == 0:
-
-            print("\n================ FINAL DEBUG ================")
-
-            print("Prediction shape:")
-            print(prediction.shape)
-
-            print("GT shape:")
-            print(semantic_gt.shape)
-
-            print("\nPrediction unique:")
-            print(torch.unique(prediction))
-
-            print("\nGT unique:")
-            print(torch.unique(semantic_gt))
-
-            print("=============================================")
+        print("\nPrediction unique:")
+        print(torch.unique(prediction))
 
         # =====================================================
-        # IGNORE PIXELS
+        # PIXEL STATS
         # =====================================================
 
-        valid_mask = semantic_gt != IGNORE_INDEX
-
-        pred_valid = prediction[valid_mask]
-        gt_valid = semantic_gt[valid_mask]
-
-        iouEvalVal.addBatch(
-            pred_valid.unsqueeze(0),
-            gt_valid.unsqueeze(0)
+        unique, counts = torch.unique(
+            prediction,
+            return_counts=True
         )
 
-        print(step)
+        print("\nPrediction distribution:")
+
+        for u, c in zip(unique, counts):
+
+            print(
+                f"class {u.item()} -> {c.item()}"
+            )
+
+        # =====================================================
+        # IOU
+        # =====================================================
+
+        try:
+
+            iouEvalVal.addBatch(
+                prediction.squeeze(1),
+                semantic_gt.squeeze(1)
+            )
+
+        except Exception as e:
+
+            print("\nIOU ERROR:")
+            print(e)
+
+            print("\nPrediction shape:")
+            print(prediction.shape)
+
+            print("\nGT shape:")
+            print(semantic_gt.shape)
+
+            raise e
+
+        print(f"\nStep {step} completed")
 
     # =====================================================
     # RESULTS
@@ -552,9 +375,31 @@ def main(args):
     print("Took ", time.time()-start, "seconds")
     print("=======================================")
 
-    print("Per-Class IoU:")
+    class_names = [
+        "Road",
+        "Sidewalk",
+        "Building",
+        "Wall",
+        "Fence",
+        "Pole",
+        "Traffic Light",
+        "Traffic Sign",
+        "Vegetation",
+        "Terrain",
+        "Sky",
+        "Person",
+        "Rider",
+        "Car",
+        "Truck",
+        "Bus",
+        "Train",
+        "Motorcycle",
+        "Bicycle"
+    ]
 
-    for i in range(NUM_SHARED_CLASSES):
+    print("\nPer-Class IoU:\n")
+
+    for i in range(19):
 
         value = iou_classes[i].item()
 
@@ -564,9 +409,9 @@ def main(args):
             + '\033[0m'
         )
 
-        print(f"{SHARED_CLASSES[i]}: {iouStr}")
+        print(f"{class_names[i]}: {iouStr}")
 
-    print("=======================================")
+    print("\n=======================================")
 
     iouStr = (
         getColorEntry(iouVal.item())
@@ -574,7 +419,7 @@ def main(args):
         + '\033[0m'
     )
 
-    print("SHARED MEAN IoU:", iouStr, "%")
+    print("MEAN IoU:", iouStr)
 
 # =========================================================
 # ENTRY
@@ -603,12 +448,6 @@ if __name__ == '__main__':
     parser.add_argument(
         '--cpu',
         action='store_true'
-    )
-
-    parser.add_argument(
-        '--num-blocks',
-        type=int,
-        default=3
     )
 
     main(parser.parse_args())
