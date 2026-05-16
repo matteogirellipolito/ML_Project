@@ -1,10 +1,8 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torchvision.transforms import ToPILImage, ToTensor, Resize
-from torchvision.transforms import InterpolationMode
+from torchvision.transforms import Resize, InterpolationMode
 from torchvision.transforms.functional import resize
-import os
 import time
 import random
 
@@ -18,10 +16,78 @@ from models.vit import ViT
 from iouEval import iouEval, getColorEntry
 
 # =========================================================
-# CONFIG
+# SHARED LABEL SPACE
 # =========================================================
 
-NUM_CLASSES = 20
+IGNORE_INDEX = 255
+
+SHARED_CLASSES = [
+    "person",
+    "car",
+    "truck",
+    "bus",
+    "motorcycle",
+    "bicycle",
+    "traffic light",
+]
+
+CITYSCAPES_LABEL_TO_ID = {
+    "road": 0,
+    "sidewalk": 1,
+    "building": 2,
+    "wall": 3,
+    "fence": 4,
+    "pole": 5,
+    "traffic light": 6,
+    "traffic sign": 7,
+    "vegetation": 8,
+    "terrain": 9,
+    "sky": 10,
+    "person": 11,
+    "rider": 12,
+    "car": 13,
+    "truck": 14,
+    "bus": 15,
+    "train": 16,
+    "motorcycle": 17,
+    "bicycle": 18,
+}
+
+COCO_LABEL_TO_ID = {
+    "person": 0,
+    "bicycle": 1,
+    "car": 2,
+    "motorcycle": 3,
+    "bus": 5,
+    "truck": 7,
+    "traffic light": 9,
+}
+
+SHARED_NAME_TO_ID = {
+    name: idx for idx, name in enumerate(SHARED_CLASSES)
+}
+
+CITYSCAPES_TO_SHARED = {
+    CITYSCAPES_LABEL_TO_ID["person"]: SHARED_NAME_TO_ID["person"],
+    CITYSCAPES_LABEL_TO_ID["car"]: SHARED_NAME_TO_ID["car"],
+    CITYSCAPES_LABEL_TO_ID["truck"]: SHARED_NAME_TO_ID["truck"],
+    CITYSCAPES_LABEL_TO_ID["bus"]: SHARED_NAME_TO_ID["bus"],
+    CITYSCAPES_LABEL_TO_ID["motorcycle"]: SHARED_NAME_TO_ID["motorcycle"],
+    CITYSCAPES_LABEL_TO_ID["bicycle"]: SHARED_NAME_TO_ID["bicycle"],
+    CITYSCAPES_LABEL_TO_ID["traffic light"]: SHARED_NAME_TO_ID["traffic light"],
+}
+
+COCO_TO_SHARED = {
+    COCO_LABEL_TO_ID["person"]: SHARED_NAME_TO_ID["person"],
+    COCO_LABEL_TO_ID["car"]: SHARED_NAME_TO_ID["car"],
+    COCO_LABEL_TO_ID["truck"]: SHARED_NAME_TO_ID["truck"],
+    COCO_LABEL_TO_ID["bus"]: SHARED_NAME_TO_ID["bus"],
+    COCO_LABEL_TO_ID["motorcycle"]: SHARED_NAME_TO_ID["motorcycle"],
+    COCO_LABEL_TO_ID["bicycle"]: SHARED_NAME_TO_ID["bicycle"],
+    COCO_LABEL_TO_ID["traffic light"]: SHARED_NAME_TO_ID["traffic light"],
+}
+
+NUM_SHARED_CLASSES = len(SHARED_CLASSES)
 
 # =========================================================
 # SEED
@@ -72,10 +138,6 @@ def load_my_state_dict(model, state_dict):
 
         loaded += 1
 
-    # =====================================================
-    # FIND REAL MISSING MODEL KEYS
-    # =====================================================
-
     checkpoint_keys = set()
 
     for k in state_dict.keys():
@@ -91,23 +153,12 @@ def load_my_state_dict(model, state_dict):
         list(model_keys - checkpoint_keys)
     )
 
-    # =====================================================
-    # PRINT
-    # =====================================================
-
     print("\n================ MODEL LOAD ================")
 
     print(f"Loaded params: {loaded}")
-
     print(f"Missing checkpoint keys: {len(missing)}")
-
     print(f"Missing model keys: {len(real_missing_model_keys)}")
-
     print(f"Shape mismatches: {len(mismatch)}")
-
-    # =====================================================
-    # MISSING IN CHECKPOINT
-    # =====================================================
 
     if len(missing) > 0:
 
@@ -116,20 +167,12 @@ def load_my_state_dict(model, state_dict):
         for k in missing:
             print(k)
 
-    # =====================================================
-    # MISSING IN MODEL
-    # =====================================================
-
     if len(real_missing_model_keys) > 0:
 
         print("\n--- MODEL KEYS MISSING FROM CHECKPOINT ---")
 
         for k in real_missing_model_keys:
             print(k)
-
-    # =====================================================
-    # SHAPE MISMATCHES
-    # =====================================================
 
     if len(mismatch) > 0:
 
@@ -240,6 +283,44 @@ def target_to_semantic(target):
     return semantic
 
 # =========================================================
+# REMAP TARGET TO SHARED SPACE
+# =========================================================
+
+def remap_target_to_shared(target):
+
+    shared = torch.ones_like(target) * IGNORE_INDEX
+
+    for src_id, dst_id in CITYSCAPES_TO_SHARED.items():
+
+        shared[target == src_id] = dst_id
+
+    return shared
+
+# =========================================================
+# REMAP LOGITS TO SHARED SPACE
+# =========================================================
+
+def remap_logits_to_shared(logits):
+
+    """
+    logits shape:
+    [19, H, W]
+    """
+
+    H, W = logits.shape[-2:]
+
+    shared_logits = torch.zeros(
+        (NUM_SHARED_CLASSES, H, W),
+        device=logits.device
+    )
+
+    for src_id, dst_id in CITYSCAPES_TO_SHARED.items():
+
+        shared_logits[dst_id] += logits[src_id]
+
+    return shared_logits
+
+# =========================================================
 # MAIN
 # =========================================================
 
@@ -251,10 +332,6 @@ def main(args):
 
     print("\nDEVICE:", device)
 
-    # =====================================================
-    # MODEL
-    # =====================================================
-
     print("\nLoading EoMT...")
 
     model = load_eomt(
@@ -263,26 +340,18 @@ def main(args):
         args.num_blocks
     )
 
-    # =====================================================
-    # DATASET
-    # =====================================================
-
     print("\nCreating datamodule...")
 
     datamodule = CityscapesSemantic(
         path=args.datadir,
         batch_size=1,
         num_workers=args.num_workers,
-        img_size=(640,640),
+        img_size=(640, 640),
     )
 
     datamodule.setup()
 
     loader = datamodule.val_dataloader()
-
-   # =====================================================
-    # RESIZE
-    # =====================================================
 
     image_resize = Resize(
         (640, 640),
@@ -293,16 +362,12 @@ def main(args):
         (640, 640),
         interpolation=InterpolationMode.NEAREST
     )
-    
+
     print(
         f"\nFound {len(datamodule.cityscapes_val_dataset)} validation images"
     )
 
-    # =====================================================
-    # IOU
-    # =====================================================
-
-    iouEvalVal = iouEval(NUM_CLASSES)
+    iouEvalVal = iouEval(NUM_SHARED_CLASSES)
 
     start = time.time()
 
@@ -316,10 +381,6 @@ def main(args):
 
         image = images[0]
 
-        # =====================================================
-        # RESIZE IMAGE
-        # =====================================================
-
         image = image_resize(image)
 
         if not args.cpu:
@@ -331,19 +392,19 @@ def main(args):
 
         semantic_gt = semantic_gt.unsqueeze(0)
 
-        # =====================================================
-        # RESIZE GT
-        # =====================================================
-
         semantic_gt = target_resize(semantic_gt)
 
         semantic_gt = semantic_gt.long()
 
-        semantic_gt = semantic_gt.unsqueeze(0).cpu()
+        # =====================================================
+        # REMAP GT TO SHARED LABEL SPACE
+        # =====================================================
 
-        # =============================================
-        # DEBUG GT
-        # =============================================
+        semantic_gt = remap_target_to_shared(
+            semantic_gt
+        )
+
+        semantic_gt = semantic_gt.unsqueeze(0).cpu()
 
         if step == 0:
 
@@ -357,9 +418,9 @@ def main(args):
 
             print("==========================================")
 
-        # =============================================
+        # =====================================================
         # FORWARD
-        # =============================================
+        # =====================================================
 
         with torch.no_grad():
 
@@ -388,9 +449,9 @@ def main(args):
 
             print("==============================================")
 
-        # =============================================
+        # =====================================================
         # QUERY -> PIXEL
-        # =============================================
+        # =====================================================
 
         mask_probs = torch.sigmoid(mask_logits)
 
@@ -422,15 +483,28 @@ def main(args):
         # remove void
         pixel_logits = pixel_logits[:, :-1]
 
-        prediction = pixel_logits.max(1)[1]
+        # =====================================================
+        # RESIZE PIXEL LOGITS TO GT SIZE
+        # =====================================================
 
-        prediction = prediction.unsqueeze(1).float()
-
-        prediction = resize(
-            prediction,
+        pixel_logits = F.interpolate(
+            pixel_logits,
             size=semantic_gt.shape[-2:],
-            interpolation=InterpolationMode.NEAREST
+            mode="bilinear",
+            align_corners=False
         )
+
+        # =====================================================
+        # REMAP TO SHARED SPACE
+        # =====================================================
+
+        shared_logits = remap_logits_to_shared(
+            pixel_logits[0]
+        )
+
+        prediction = shared_logits.argmax(0)
+
+        prediction = prediction.unsqueeze(0).unsqueeze(0)
 
         prediction = prediction.long().cpu()
 
@@ -452,9 +526,18 @@ def main(args):
 
             print("=============================================")
 
+        # =====================================================
+        # IGNORE PIXELS
+        # =====================================================
+
+        valid_mask = semantic_gt != IGNORE_INDEX
+
+        pred_valid = prediction[valid_mask]
+        gt_valid = semantic_gt[valid_mask]
+
         iouEvalVal.addBatch(
-            prediction,
-            semantic_gt
+            pred_valid.unsqueeze(0),
+            gt_valid.unsqueeze(0)
         )
 
         print(step)
@@ -471,29 +554,7 @@ def main(args):
 
     print("Per-Class IoU:")
 
-    class_names = [
-        "Road",
-        "Sidewalk",
-        "Building",
-        "Wall",
-        "Fence",
-        "Pole",
-        "Traffic Light",
-        "Traffic Sign",
-        "Vegetation",
-        "Terrain",
-        "Sky",
-        "Person",
-        "Rider",
-        "Car",
-        "Truck",
-        "Bus",
-        "Train",
-        "Motorcycle",
-        "Bicycle"
-    ]
-
-    for i in range(19):
+    for i in range(NUM_SHARED_CLASSES):
 
         value = iou_classes[i].item()
 
@@ -503,7 +564,7 @@ def main(args):
             + '\033[0m'
         )
 
-        print(f"{class_names[i]}: {iouStr}")
+        print(f"{SHARED_CLASSES[i]}: {iouStr}")
 
     print("=======================================")
 
@@ -513,7 +574,7 @@ def main(args):
         + '\033[0m'
     )
 
-    print("MEAN IoU:", iouStr, "%")
+    print("SHARED MEAN IoU:", iouStr, "%")
 
 # =========================================================
 # ENTRY
