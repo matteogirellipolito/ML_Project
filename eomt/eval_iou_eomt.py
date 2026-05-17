@@ -308,49 +308,57 @@ def main(args):
                     print(v.dtype)
 
             # ====================================================
-            # FIND SEMANTIC GT KEY
+            # BUILD SEMANTIC GT FROM INSTANCE MASKS
             # ====================================================
 
-            semantic_key = None
+            semantic_gt_list = []
 
-            possible_keys = [
-                "semantic",
-                "sem_seg",
-                "mask",
-                "masks",
-                "target",
-                "labels",
-            ]
+            for idx, target in enumerate(targets_tuple):
 
-            for key in possible_keys:
+                masks = target["masks"]      # [N, H, W]
+                labels = target["labels"]    # [N]
 
-                if key in first_target:
+                print(f"\nIMAGE {idx}")
+                print("Masks shape:", masks.shape)
+                print("Labels:", labels)
 
-                    semantic_key = key
-                    break
+                H, W = masks.shape[-2:]
 
-            print("\nSELECTED SEMANTIC KEY:")
-            print(semantic_key)
-
-            if semantic_key is None:
-
-                raise RuntimeError(
-                    "Could not find semantic GT key"
+                semantic_mask = torch.zeros(
+                    (H, W),
+                    dtype=torch.long
                 )
 
+                # ============================================
+                # INSTANCE -> SEMANTIC
+                # ============================================
+
+                for instance_idx in range(len(labels)):
+
+                    class_id = labels[instance_idx].item()
+
+                    instance_mask = masks[instance_idx]
+
+                    semantic_mask[instance_mask] = class_id
+
+                semantic_gt_list.append(semantic_mask)
+
             # ====================================================
-            # STACK GT
+            # STACK FINAL GT
             # ====================================================
 
-            semantic_gt = torch.stack([
-                t[semantic_key]
-                for t in targets_tuple
-            ], dim=0)
+            semantic_gt = torch.stack(
+                semantic_gt_list,
+                dim=0
+            )
 
-            print("\nSTACKED GT SHAPE:")
+            # Add channel dimension
+            semantic_gt = semantic_gt.unsqueeze(1)
+
+            print("\nFINAL SEMANTIC GT SHAPE:")
             print(semantic_gt.shape)
 
-            print("\nGT UNIQUE:")
+            print("\nFINAL GT UNIQUE:")
             print(torch.unique(semantic_gt))
 
             # ====================================================
