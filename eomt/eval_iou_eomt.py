@@ -262,37 +262,74 @@ def main(args):
             print("\nBATCH TYPE:")
             print(type(batch))
 
-            if isinstance(batch, (list, tuple)):
+            print("\nBATCH LENGTH:")
+            print(len(batch))
 
-                print("\nBATCH LENGTH:")
-                print(len(batch))
+            for i, item in enumerate(batch):
 
-                for i, item in enumerate(batch):
+                print(f"\nLEVEL 1 ITEM {i}")
+                print(type(item))
 
-                    print(f"\nBatch item {i} type:")
-                    print(type(item))
+                if isinstance(item, (list, tuple)):
 
-                    if torch.is_tensor(item):
+                    print(f"LENGTH: {len(item)}")
 
-                        print(f"Shape: {item.shape}")
-                        print(f"Dtype: {item.dtype}")
+                    for j, subitem in enumerate(item):
+
+                        print(f"\n  LEVEL 2 ITEM {j}")
+                        print(type(subitem))
+
+                        if torch.is_tensor(subitem):
+
+                            print(f"  SHAPE: {subitem.shape}")
+                            print(f"  DTYPE: {subitem.dtype}")
+
+                        elif isinstance(subitem, (list, tuple)):
+
+                            print(f"  NESTED LENGTH: {len(subitem)}")
+
+                            for k, deepitem in enumerate(subitem):
+
+                                print(f"\n    LEVEL 3 ITEM {k}")
+                                print(type(deepitem))
+
+                                if torch.is_tensor(deepitem):
+
+                                    print(f"    SHAPE: {deepitem.shape}")
+                                    print(f"    DTYPE: {deepitem.dtype}")
 
             # ====================================================
-            # UNPACK BATCH
+            # SMART UNPACK
             # ====================================================
 
-            if isinstance(batch, (list, tuple)):
+            def find_first_tensor(obj):
 
-                images = batch[0].to(device)
-                semantic_gt = batch[1].to(device)
+                if torch.is_tensor(obj):
+                    return obj
 
-            else:
+                if isinstance(obj, (list, tuple)):
 
-                images = batch["image"].to(device)
-                semantic_gt = batch["semantic"].to(device)
+                    for item in obj:
 
-            print("GT unique:")
-            print(torch.unique(semantic_gt))
+                        result = find_first_tensor(item)
+
+                        if result is not None:
+                            return result
+
+                return None
+
+
+            images = find_first_tensor(batch[0])
+            semantic_gt = find_first_tensor(batch[1])
+
+            print("\nFOUND IMAGE TENSOR:")
+            print(images.shape)
+
+            print("\nFOUND GT TENSOR:")
+            print(semantic_gt.shape)
+
+            images = images.to(device)
+            semantic_gt = semantic_gt.to(device)
 
             # ====================================================
             # FORWARD
