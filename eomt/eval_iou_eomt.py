@@ -9,6 +9,7 @@ from PIL import Image
 from tqdm import tqdm
 from argparse import ArgumentParser
 
+from torchvision.transforms import Compose, Resize, ToTensor
 from torchvision.transforms.functional import resize
 from torchvision.transforms import InterpolationMode
 
@@ -42,6 +43,20 @@ IGNORE_INDEX = 255
 
 IMG_SIZE = 1024
 BATCH_SIZE = 1
+
+
+# ============================================================
+# TRANSFORMS
+# ============================================================
+
+input_transform = Compose([
+    Resize((IMG_SIZE, IMG_SIZE), Image.BILINEAR),
+    ToTensor(),
+])
+
+target_transform = Compose([
+    Resize((IMG_SIZE, IMG_SIZE), Image.NEAREST),
+])
 
 
 # ============================================================
@@ -80,6 +95,9 @@ def load_my_state_dict(model, state_dict):
         if name not in own_state:
 
             unused.append(original_name)
+
+            print(f"[UNUSED] {original_name}")
+
             continue
 
         if own_state[name].shape != param.shape:
@@ -89,6 +107,11 @@ def load_my_state_dict(model, state_dict):
                 "checkpoint": tuple(param.shape),
                 "model": tuple(own_state[name].shape)
             })
+
+            print(f"[SHAPE MISMATCH] {name}")
+            print(f"checkpoint: {tuple(param.shape)}")
+            print(f"model:      {tuple(own_state[name].shape)}")
+            print()
 
             continue
 
@@ -119,6 +142,24 @@ def load_my_state_dict(model, state_dict):
 
         for k in unused:
             print(k)
+
+    if len(missing) > 0:
+
+        print("\n========== MISSING MODEL KEYS ==========\n")
+
+        for k in missing:
+            print(k)
+
+    if len(mismatched) > 0:
+
+        print("\n========== SHAPE MISMATCHES ==========\n")
+
+        for item in mismatched:
+
+            print(item["key"])
+            print(f'checkpoint: {item["checkpoint"]}')
+            print(f'model:      {item["model"]}')
+            print()
 
     return model
 
@@ -190,7 +231,7 @@ def main(args):
     datamodule = CityscapesSemantic(
         path=args.data_dir,
         batch_size=BATCH_SIZE,
-        num_workers=2,
+        num_workers=4,
         img_size=IMG_SIZE,
     )
 
@@ -214,8 +255,26 @@ def main(args):
 
         for step, batch in enumerate(tqdm(val_loader)):
 
+            print(f"\n================ STEP {step} ================\n")
+
+            # ====================================================
+            # BATCH DEBUG
+            # ====================================================
+
+            print("\nBATCH TYPE:")
+            print(type(batch))
+
+            print("\nBATCH LENGTH:")
+            print(len(batch))
+
             images_tuple = batch[0]
             targets_tuple = batch[1]
+
+            print("\nIMAGES TUPLE LENGTH:")
+            print(len(images_tuple))
+
+            print("\nTARGETS TUPLE LENGTH:")
+            print(len(targets_tuple))
 
             # ====================================================
             # STACK IMAGES
@@ -225,16 +284,45 @@ def main(args):
                 img.float() for img in images_tuple
             ], dim=0)
 
+            print("\nSTACKED IMAGES SHAPE:")
+            print(images.shape)
+
             # ====================================================
-            # BUILD SEMANTIC GT
+            # TARGET DEBUG
+            # ====================================================
+
+            first_target = targets_tuple[0]
+
+            print("\nFIRST TARGET TYPE:")
+            print(type(first_target))
+
+            print("\nFIRST TARGET KEYS:")
+            print(first_target.keys())
+
+            for k, v in first_target.items():
+
+                print(f"\nKEY: {k}")
+                print(type(v))
+
+                if torch.is_tensor(v):
+
+                    print(v.shape)
+                    print(v.dtype)
+
+            # ====================================================
+            # BUILD SEMANTIC GT FROM INSTANCE MASKS
             # ====================================================
 
             semantic_gt_list = []
 
-            for target in targets_tuple:
+            for idx, target in enumerate(targets_tuple):
 
-                masks = target["masks"]
-                labels = target["labels"]
+                masks = target["masks"]      # [N, H, W]
+                labels = target["labels"]    # [N]
+
+                print(f"\nIMAGE {idx}")
+                print("Masks shape:", masks.shape)
+                print("Labels:", labels)
 
                 H, W = masks.shape[-2:]
 
@@ -242,6 +330,10 @@ def main(args):
                     (H, W),
                     dtype=torch.long
                 )
+
+                # ============================================
+                # INSTANCE -> SEMANTIC
+                # ============================================
 
                 for instance_idx in range(len(labels)):
 
@@ -253,19 +345,35 @@ def main(args):
 
                 semantic_gt_list.append(semantic_mask)
 
+            # ====================================================
+            # STACK FINAL GT
+            # ====================================================
+
             semantic_gt = torch.stack(
                 semantic_gt_list,
                 dim=0
-            ).unsqueeze(1)
+            )
+
+            # Add channel dimension
+            semantic_gt = semantic_gt.unsqueeze(1)
+
+            print("\nFINAL SEMANTIC GT SHAPE:")
+            print(semantic_gt.shape)
+
+            print("\nFINAL GT UNIQUE:")
+            print(torch.unique(semantic_gt))
 
             # ====================================================
-            # NORMALIZE
+            # NORMALIZE IMAGES
             # ====================================================
 
             images = images.float() / 255.0
 
+            print("\nIMAGES MIN/MAX BEFORE RESIZE:")
+            print(images.min(), images.max())
+
             # ====================================================
-            # RESIZE
+            # RESIZE IMAGES
             # ====================================================
 
             images = resize(
@@ -274,54 +382,62 @@ def main(args):
                 interpolation=InterpolationMode.BILINEAR,
             )
 
+            print("\nIMAGES SHAPE AFTER RESIZE:")
+            print(images.shape)
+
+            # ====================================================
+            # RESIZE GT
+            # ====================================================
+
             semantic_gt = resize(
                 semantic_gt.float(),
                 size=[1024, 1024],
                 interpolation=InterpolationMode.NEAREST,
             ).long()
 
+            print("\nGT SHAPE AFTER RESIZE:")
+            print(semantic_gt.shape)
+
             # ====================================================
-            # DEVICE
+            # MOVE TO DEVICE
             # ====================================================
 
             images = images.to(device)
+
             semantic_gt = semantic_gt.to(device)
 
             # ====================================================
             # FORWARD
             # ====================================================
 
+            print("\nCUDA MEMORY BEFORE FORWARD:")
+            print(torch.cuda.memory_allocated() / 1024**3, "GB")
+
             result = model(images)
 
             mask_logits = result[0][-1]
             class_logits = result[1][-1]
 
-            # ====================================================
-            # DEBUG ONLY EVERY 20 STEPS
-            # ====================================================
+            print("\nmask_logits shape:")
+            print(mask_logits.shape)
 
-            if step % 20 == 0:
+            print("class_logits shape:")
+            print(class_logits.shape)
 
-                print(f"\n================ STEP {step} ================\n")
+            print("\nmask logits min/max:")
+            print(mask_logits.min().item())
+            print(mask_logits.max().item())
 
-                print("images shape:")
-                print(images.shape)
+            print("\nclass logits min/max:")
+            print(class_logits.min().item())
+            print(class_logits.max().item())
 
-                print("\nsemantic_gt unique:")
-                print(torch.unique(semantic_gt))
+            print("\nNaN checks:")
+            print(torch.isnan(mask_logits).any())
+            print(torch.isnan(class_logits).any())
 
-                print("\nmask_logits shape:")
-                print(mask_logits.shape)
-
-                print("\nclass_logits shape:")
-                print(class_logits.shape)
-
-                print("\nclass logits stats:")
-                print(
-                    class_logits.min().item(),
-                    class_logits.max().item(),
-                    class_logits.mean().item()
-                )
+            print("\nCUDA MEMORY AFTER FORWARD:")
+            print(torch.cuda.memory_allocated() / 1024**3, "GB")
 
             # ====================================================
             # UPSAMPLE MASKS
@@ -334,8 +450,11 @@ def main(args):
                 align_corners=False
             )
 
+            print("\nUpsampled mask logits:")
+            print(mask_logits.shape)
+
             # ====================================================
-            # QUERY -> PIXEL
+            # QUERY -> PIXEL CONVERSION
             # ====================================================
 
             mask_probs = torch.sigmoid(mask_logits)
@@ -345,9 +464,24 @@ def main(args):
                 dim=-1
             )
 
+            print("\nclass_probs shape:")
+            print(class_probs.shape)
+
+            # REMOVE VOID / NO-OBJECT CLASS
+            class_probs = class_probs[..., :-1]
+
+            print("\nclass_probs without void:")
+            print(class_probs.shape)
+
             Mat_Class = class_probs.transpose(1, 2)
 
             Mat_Mask = mask_probs.flatten(2)
+
+            print("\nMat_Class shape:")
+            print(Mat_Class.shape)
+
+            print("Mat_Mask shape:")
+            print(Mat_Mask.shape)
 
             pixel_logits = torch.matmul(
                 Mat_Class,
@@ -359,62 +493,76 @@ def main(args):
                 (IMG_SIZE, IMG_SIZE)
             )
 
+            print("\npixel_logits shape:")
+            print(pixel_logits.shape)
+
+            print("\npixel logits min/max:")
+            print(pixel_logits.min().item())
+            print(pixel_logits.max().item())
+
+            print("\nPixel logits NaN:")
+            print(torch.isnan(pixel_logits).any())
+
+            # ====================================================
+            # FINAL PREDICTION
+            # ====================================================
+
             prediction = torch.argmax(
                 pixel_logits,
                 dim=1,
                 keepdim=True
             )
 
-            # ====================================================
-            # IMPORTANT DEBUGS
-            # ====================================================
+            print("\nPrediction unique:")
+            print(torch.unique(prediction))
 
-            if step % 20 == 0:
+            print("\nPrediction distribution:")
 
-                print("\npixel_logits shape:")
-                print(pixel_logits.shape)
+            uniq, counts = torch.unique(
+                prediction,
+                return_counts=True
+            )
 
-                print("\npixel logits stats:")
-                print(
-                    pixel_logits.min().item(),
-                    pixel_logits.max().item(),
-                    pixel_logits.mean().item()
-                )
+            for u, c in zip(uniq, counts):
 
-                print("\nPrediction unique:")
-                print(torch.unique(prediction))
-
-                uniq, counts = torch.unique(
-                    prediction,
-                    return_counts=True
-                )
-
-                print("\nPrediction distribution:")
-
-                for u, c in zip(uniq, counts):
-
-                    print(f"class {u.item()} -> {c.item()}")
-
-                print("\nGT classes:")
-                print(torch.unique(semantic_gt))
-
-                print("\nPred classes:")
-                print(torch.unique(prediction))
-
-                print("\nCUDA MEMORY:")
-                print(
-                    torch.cuda.memory_allocated() / 1024**3,
-                    "GB"
-                )
+                print(f"class {u.item()} -> {c.item()}")
 
             # ====================================================
-            # IOU
+            # IOU DEBUG
+            # ====================================================
+
+            print("\nIOU INPUT DEBUG")
+
+            print("\nprediction shape:")
+            print(prediction.shape)
+
+            print("semantic_gt shape:")
+            print(semantic_gt.shape)
+
+            print("\nprediction dtype:")
+            print(prediction.dtype)
+
+            print("semantic_gt dtype:")
+            print(semantic_gt.dtype)
+
+            print("\nprediction min/max:")
+            print(prediction.min())
+            print(prediction.max())
+
+            print("\nsemantic_gt min/max:")
+            print(semantic_gt.min())
+            print(semantic_gt.max())
+
+            # ====================================================
+            # IOU UPDATE
             # ====================================================
 
             iouEvalVal.addBatch(
                 prediction.long(),
                 semantic_gt.long()
             )
+
+            print(f"\nStep {step} completed")
 
     # ========================================================
     # FINAL METRICS
@@ -480,4 +628,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(args)
+    main(args) 
