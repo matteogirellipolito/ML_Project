@@ -90,11 +90,6 @@ def load_my_state_dict(model, state_dict):
                 "model": tuple(own_state[name].shape)
             })
 
-            print(f"[SHAPE MISMATCH] {name}")
-            print(f"checkpoint: {tuple(param.shape)}")
-            print(f"model:      {tuple(own_state[name].shape)}")
-            print()
-
             continue
 
         own_state[name].copy_(param)
@@ -123,13 +118,6 @@ def load_my_state_dict(model, state_dict):
         print("\n========== UNUSED KEYS ==========\n")
 
         for k in unused:
-            print(k)
-
-    if len(missing) > 0:
-
-        print("\n========== MISSING MODEL KEYS ==========\n")
-
-        for k in missing:
             print(k)
 
     return model
@@ -234,8 +222,7 @@ def main(args):
             # ====================================================
 
             images = torch.stack([
-                img.float()
-                for img in images_tuple
+                img.float() for img in images_tuple
             ], dim=0)
 
             # ====================================================
@@ -269,9 +256,7 @@ def main(args):
             semantic_gt = torch.stack(
                 semantic_gt_list,
                 dim=0
-            )
-
-            semantic_gt = semantic_gt.unsqueeze(1)
+            ).unsqueeze(1)
 
             # ====================================================
             # NORMALIZE
@@ -296,11 +281,10 @@ def main(args):
             ).long()
 
             # ====================================================
-            # MOVE TO DEVICE
+            # DEVICE
             # ====================================================
 
             images = images.to(device)
-
             semantic_gt = semantic_gt.to(device)
 
             # ====================================================
@@ -313,41 +297,7 @@ def main(args):
             class_logits = result[1][-1]
 
             # ====================================================
-            # UPSAMPLE MASKS
-            # ====================================================
-
-            mask_logits = F.interpolate(
-                mask_logits,
-                size=(IMG_SIZE, IMG_SIZE),
-                mode="bilinear",
-                align_corners=False
-            )
-
-            # ====================================================
-            # QUERY -> PIXEL CONVERSION
-            # ====================================================
-
-            # remove no-object class
-            class_logits = class_logits[..., :-1]
-
-            pixel_logits = torch.einsum(
-                "bqc,bqhw->bchw",
-                class_logits,
-                mask_logits
-            )
-
-            # ====================================================
-            # PREDICTION
-            # ====================================================
-
-            prediction = torch.argmax(
-                pixel_logits,
-                dim=1,
-                keepdim=True
-            )
-
-            # ====================================================
-            # DEBUG
+            # DEBUG ONLY EVERY 20 STEPS
             # ====================================================
 
             if step % 20 == 0:
@@ -366,26 +316,90 @@ def main(args):
                 print("\nclass_logits shape:")
                 print(class_logits.shape)
 
+                print("\nclass logits stats:")
+                print(
+                    class_logits.min().item(),
+                    class_logits.max().item(),
+                    class_logits.mean().item()
+                )
+
+            # ====================================================
+            # UPSAMPLE MASKS
+            # ====================================================
+
+            mask_logits = F.interpolate(
+                mask_logits,
+                size=(IMG_SIZE, IMG_SIZE),
+                mode="bilinear",
+                align_corners=False
+            )
+
+            # ====================================================
+            # QUERY -> PIXEL
+            # ====================================================
+
+            mask_probs = torch.sigmoid(mask_logits)
+
+            class_probs = torch.softmax(
+                class_logits,
+                dim=-1
+            )
+
+            Mat_Class = class_probs.transpose(1, 2)
+
+            Mat_Mask = mask_probs.flatten(2)
+
+            pixel_logits = torch.matmul(
+                Mat_Class,
+                Mat_Mask
+            )
+
+            pixel_logits = pixel_logits.unflatten(
+                2,
+                (IMG_SIZE, IMG_SIZE)
+            )
+
+            prediction = torch.argmax(
+                pixel_logits,
+                dim=1,
+                keepdim=True
+            )
+
+            # ====================================================
+            # IMPORTANT DEBUGS
+            # ====================================================
+
+            if step % 20 == 0:
+
                 print("\npixel_logits shape:")
                 print(pixel_logits.shape)
 
-                print("\npixel logits min/max:")
-                print(pixel_logits.min().item())
-                print(pixel_logits.max().item())
+                print("\npixel logits stats:")
+                print(
+                    pixel_logits.min().item(),
+                    pixel_logits.max().item(),
+                    pixel_logits.mean().item()
+                )
 
                 print("\nPrediction unique:")
                 print(torch.unique(prediction))
-
-                print("\nPrediction distribution:")
 
                 uniq, counts = torch.unique(
                     prediction,
                     return_counts=True
                 )
 
+                print("\nPrediction distribution:")
+
                 for u, c in zip(uniq, counts):
 
                     print(f"class {u.item()} -> {c.item()}")
+
+                print("\nGT classes:")
+                print(torch.unique(semantic_gt))
+
+                print("\nPred classes:")
+                print(torch.unique(prediction))
 
                 print("\nCUDA MEMORY:")
                 print(
@@ -394,7 +408,7 @@ def main(args):
                 )
 
             # ====================================================
-            # IOU UPDATE
+            # IOU
             # ====================================================
 
             iouEvalVal.addBatch(
