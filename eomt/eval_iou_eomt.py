@@ -42,7 +42,7 @@ NUM_CLASSES = 19
 IGNORE_INDEX = 255
 
 IMG_SIZE = 1024
-BATCH_SIZE = 16
+BATCH_SIZE = 1
 
 
 # ============================================================
@@ -410,6 +410,9 @@ def main(args):
             # FORWARD
             # ====================================================
 
+            print("\nCUDA MEMORY BEFORE FORWARD:")
+            print(torch.cuda.memory_allocated() / 1024**3, "GB")
+
             result = model(images)
 
             mask_logits = result[0][-1]
@@ -432,6 +435,9 @@ def main(args):
             print("\nNaN checks:")
             print(torch.isnan(mask_logits).any())
             print(torch.isnan(class_logits).any())
+
+            print("\nCUDA MEMORY AFTER FORWARD:")
+            print(torch.cuda.memory_allocated() / 1024**3, "GB")
 
             # ====================================================
             # UPSAMPLE MASKS
