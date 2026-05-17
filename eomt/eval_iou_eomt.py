@@ -227,7 +227,7 @@ def main(args):
     print("\nCreating datamodule...\n")
 
     datamodule = CityscapesSemantic(
-        data_dir=args.data_dir,
+        path=args.data_dir,
         batch_size=BATCH_SIZE,
         num_workers=4,
         image_size=IMG_SIZE,
