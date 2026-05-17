@@ -265,68 +265,97 @@ def main(args):
             print("\nBATCH LENGTH:")
             print(len(batch))
 
-            for i, item in enumerate(batch):
+            images_tuple = batch[0]
+            targets_tuple = batch[1]
 
-                print(f"\nLEVEL 1 ITEM {i}")
-                print(type(item))
+            print("\nIMAGES TUPLE LENGTH:")
+            print(len(images_tuple))
 
-                if isinstance(item, (list, tuple)):
-
-                    print(f"LENGTH: {len(item)}")
-
-                    for j, subitem in enumerate(item):
-
-                        print(f"\n  LEVEL 2 ITEM {j}")
-                        print(type(subitem))
-
-                        if torch.is_tensor(subitem):
-
-                            print(f"  SHAPE: {subitem.shape}")
-                            print(f"  DTYPE: {subitem.dtype}")
-
-                        elif isinstance(subitem, (list, tuple)):
-
-                            print(f"  NESTED LENGTH: {len(subitem)}")
-
-                            for k, deepitem in enumerate(subitem):
-
-                                print(f"\n    LEVEL 3 ITEM {k}")
-                                print(type(deepitem))
-
-                                if torch.is_tensor(deepitem):
-
-                                    print(f"    SHAPE: {deepitem.shape}")
-                                    print(f"    DTYPE: {deepitem.dtype}")
+            print("\nTARGETS TUPLE LENGTH:")
+            print(len(targets_tuple))
 
             # ====================================================
-            # SMART UNPACK
+            # STACK IMAGES
             # ====================================================
 
-            def find_first_tensor(obj):
+            images = torch.stack([
+                img.float() for img in images_tuple
+            ], dim=0)
 
-                if torch.is_tensor(obj):
-                    return obj
-
-                if isinstance(obj, (list, tuple)):
-
-                    for item in obj:
-
-                        result = find_first_tensor(item)
-
-                        if result is not None:
-                            return result
-
-                return None
-
-
-            images = find_first_tensor(batch[0])
-            semantic_gt = find_first_tensor(batch[1])
-
-            print("\nFOUND IMAGE TENSOR:")
+            print("\nSTACKED IMAGES SHAPE:")
             print(images.shape)
 
-            print("\nFOUND GT TENSOR:")
+            # ====================================================
+            # TARGET DEBUG
+            # ====================================================
+
+            first_target = targets_tuple[0]
+
+            print("\nFIRST TARGET TYPE:")
+            print(type(first_target))
+
+            print("\nFIRST TARGET KEYS:")
+            print(first_target.keys())
+
+            for k, v in first_target.items():
+
+                print(f"\nKEY: {k}")
+                print(type(v))
+
+                if torch.is_tensor(v):
+
+                    print(v.shape)
+                    print(v.dtype)
+
+            # ====================================================
+            # FIND SEMANTIC GT KEY
+            # ====================================================
+
+            semantic_key = None
+
+            possible_keys = [
+                "semantic",
+                "sem_seg",
+                "mask",
+                "masks",
+                "target",
+                "labels",
+            ]
+
+            for key in possible_keys:
+
+                if key in first_target:
+
+                    semantic_key = key
+                    break
+
+            print("\nSELECTED SEMANTIC KEY:")
+            print(semantic_key)
+
+            if semantic_key is None:
+
+                raise RuntimeError(
+                    "Could not find semantic GT key"
+                )
+
+            # ====================================================
+            # STACK GT
+            # ====================================================
+
+            semantic_gt = torch.stack([
+                t[semantic_key]
+                for t in targets_tuple
+            ], dim=0)
+
+            print("\nSTACKED GT SHAPE:")
             print(semantic_gt.shape)
+
+            print("\nGT UNIQUE:")
+            print(torch.unique(semantic_gt))
+
+            # ====================================================
+            # MOVE TO DEVICE
+            # ====================================================
 
             images = images.to(device)
             semantic_gt = semantic_gt.to(device)
