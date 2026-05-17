@@ -230,7 +230,7 @@ def main(args):
         path=args.data_dir,
         batch_size=BATCH_SIZE,
         num_workers=4,
-        image_size=IMG_SIZE,
+        img_size=IMG_SIZE,
     )
 
     datamodule.setup()
