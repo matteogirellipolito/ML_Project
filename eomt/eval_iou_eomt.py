@@ -255,9 +255,41 @@ def main(args):
 
             print(f"\n================ STEP {step} ================\n")
 
-            images = batch["image"].to(device)
+            # ====================================================
+            # BATCH DEBUG
+            # ====================================================
 
-            semantic_gt = batch["semantic"].to(device)
+            print("\nBATCH TYPE:")
+            print(type(batch))
+
+            if isinstance(batch, (list, tuple)):
+
+                print("\nBATCH LENGTH:")
+                print(len(batch))
+
+                for i, item in enumerate(batch):
+
+                    print(f"\nBatch item {i} type:")
+                    print(type(item))
+
+                    if torch.is_tensor(item):
+
+                        print(f"Shape: {item.shape}")
+                        print(f"Dtype: {item.dtype}")
+
+            # ====================================================
+            # UNPACK BATCH
+            # ====================================================
+
+            if isinstance(batch, (list, tuple)):
+
+                images = batch[0].to(device)
+                semantic_gt = batch[1].to(device)
+
+            else:
+
+                images = batch["image"].to(device)
+                semantic_gt = batch["semantic"].to(device)
 
             print("GT unique:")
             print(torch.unique(semantic_gt))
