@@ -14,7 +14,7 @@ from torchvision.transforms import Compose, Resize, ToTensor
 from models.eomt import EoMT
 from models.vit import ViT
 
-from cityscapes import CityscapesDataModule
+from datasets.cityscapes_semantic import CityscapesSemantic
 from iouEval import iouEval
 
 
@@ -226,7 +226,7 @@ def main(args):
 
     print("\nCreating datamodule...\n")
 
-    datamodule = CityscapesDataModule(
+    datamodule = CityscapesSemantic(
         data_dir=args.data_dir,
         batch_size=BATCH_SIZE,
         num_workers=4,
