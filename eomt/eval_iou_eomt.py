@@ -10,6 +10,8 @@ from tqdm import tqdm
 from argparse import ArgumentParser
 
 from torchvision.transforms import Compose, Resize, ToTensor
+from torchvision.transforms.functional import resize
+from torchvision.transforms import InterpolationMode
 
 from models.eomt import EoMT
 from models.vit import ViT
@@ -362,10 +364,46 @@ def main(args):
             print(torch.unique(semantic_gt))
 
             # ====================================================
+            # NORMALIZE IMAGES
+            # ====================================================
+
+            images = images.float() / 255.0
+
+            print("\nIMAGES MIN/MAX BEFORE RESIZE:")
+            print(images.min(), images.max())
+
+            # ====================================================
+            # RESIZE IMAGES
+            # ====================================================
+
+            images = resize(
+                images,
+                size=[1024, 1024],
+                interpolation=InterpolationMode.BILINEAR,
+            )
+
+            print("\nIMAGES SHAPE AFTER RESIZE:")
+            print(images.shape)
+
+            # ====================================================
+            # RESIZE GT
+            # ====================================================
+
+            semantic_gt = resize(
+                semantic_gt.float(),
+                size=[1024, 1024],
+                interpolation=InterpolationMode.NEAREST,
+            ).long()
+
+            print("\nGT SHAPE AFTER RESIZE:")
+            print(semantic_gt.shape)
+
+            # ====================================================
             # MOVE TO DEVICE
             # ====================================================
 
             images = images.to(device)
+
             semantic_gt = semantic_gt.to(device)
 
             # ====================================================
