@@ -381,7 +381,19 @@ def main(args):
             # NORMALIZE IMAGES
             # ====================================================
 
-            images = images.float() / 255.0
+            #images = images.float() / 255.0
+
+            images = images.float()
+
+            mean = torch.tensor(
+                [0.485, 0.456, 0.406]
+                ).view(1,3,1,1)
+
+            std = torch.tensor(
+                [0.229, 0.224, 0.225]
+            ).view(1,3,1,1)
+
+            images = (images - mean) / std
 
             #print("\nIMAGES MIN/MAX BEFORE RESIZE:")
             #print(images.min(), images.max())
