@@ -41,7 +41,8 @@ torch.backends.cudnn.benchmark = True
 NUM_CLASSES = 19
 IGNORE_INDEX = 255
 
-IMG_SIZE = 1024
+IMG_H = 1024
+IMG_W = 2048
 BATCH_SIZE = 1
 
 
@@ -50,12 +51,12 @@ BATCH_SIZE = 1
 # ============================================================
 
 input_transform = Compose([
-    Resize((IMG_SIZE, IMG_SIZE), Image.BILINEAR),
+    Resize((IMG_H, IMG_W), Image.BILINEAR),
     ToTensor(),
 ])
 
 target_transform = Compose([
-    Resize((IMG_SIZE, IMG_SIZE), Image.NEAREST),
+    Resize((IMG_H, IMG_W), Image.NEAREST),
 ])
 
 
@@ -173,7 +174,7 @@ def load_eomt(args, device):
     print("Creating ViT backbone...")
 
     encoder = ViT(
-        img_size=(IMG_SIZE, IMG_SIZE),
+        img_size=(IMG_H, IMG_W),
         patch_size=16,
         backbone_name="vit_base_patch14_reg4_dinov2",
     )
@@ -232,7 +233,7 @@ def main(args):
         path=args.data_dir,
         batch_size=BATCH_SIZE,
         num_workers=4,
-        img_size=IMG_SIZE,
+        img_size=(IMG_H,IMG_W),
     )
 
     datamodule.setup()
@@ -388,28 +389,12 @@ def main(args):
             # ====================================================
             # RESIZE IMAGES
             # ====================================================
-            """
-            images = resize(
-                images,
-                size=[1024, 1024],
-                interpolation=InterpolationMode.BILINEAR,
-            )
-            """
-
-            TARGET_H = 512
-            TARGET_W = 1024
 
             images = resize(
                 images,
-                size=[TARGET_H, TARGET_W],
+                size=[1024, 2048],
                 interpolation=InterpolationMode.BILINEAR,
             )
-
-            semantic_gt = resize(
-                semantic_gt.float(),
-                size=[TARGET_H, TARGET_W],
-                interpolation=InterpolationMode.NEAREST,
-            ).long()
 
             print("\nIMAGES SHAPE AFTER RESIZE:")
             print(images.shape)
@@ -417,13 +402,13 @@ def main(args):
             # ====================================================
             # RESIZE GT
             # ====================================================
-            """
+
             semantic_gt = resize(
                 semantic_gt.float(),
-                size=[1024, 1024],
+                size=[1024, 2048],
                 interpolation=InterpolationMode.NEAREST,
             ).long()
-            """
+
             print("\nGT SHAPE AFTER RESIZE:")
             print(semantic_gt.shape)
 
@@ -477,17 +462,10 @@ def main(args):
             # ====================================================
             # UPSAMPLE MASKS
             # ====================================================
-            """
+
             mask_logits = F.interpolate(
                 mask_logits,
-                size=(IMG_SIZE, IMG_SIZE),
-                mode="bilinear",
-                align_corners=False
-            )
-            """
-            mask_logits = F.interpolate(
-                mask_logits,
-                size=(TARGET_H, TARGET_W),
+                size=(IMG_H, IMG_W),
                 mode="bilinear",
                 align_corners=False
             )
@@ -534,16 +512,12 @@ def main(args):
                 Mat_Class,
                 Mat_Mask
             )
-            """
+
             pixel_logits = pixel_logits.unflatten(
                 2,
-                (IMG_SIZE, IMG_SIZE)
+                (IMG_H, IMG_W)
             )
-            """
-            pixel_logits = pixel_logits.unflatten(
-                2,
-                (TARGET_H, TARGET_W)
-            )
+
             pixel_probs = torch.softmax(pixel_logits, dim=1)
 
             max_conf = pixel_probs.max(dim=1)[0]
