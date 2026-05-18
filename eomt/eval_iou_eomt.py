@@ -380,9 +380,7 @@ def main(args):
             # NORMALIZE IMAGES
             # ====================================================
 
-            #images = images.float() / 255.0
-
-            images = images.float()
+            images = images.float() / 255.0
 
             #print("\nIMAGES MIN/MAX BEFORE RESIZE:")
             #print(images.min(), images.max())
@@ -420,6 +418,12 @@ def main(args):
             images = images.to(device)
 
             semantic_gt = semantic_gt.to(device)
+
+            print("\nIMAGE STATS:")
+            print("min:", images.min().item())
+            print("max:", images.max().item())
+            print("mean:", images.mean().item())
+            print("std:", images.std().item())
 
             # ====================================================
             # FORWARD
@@ -472,7 +476,7 @@ def main(args):
             # QUERY -> PIXEL CONVERSION
             # ====================================================
 
-            mask_probs = torch.sigmoid(mask_logits)
+            #mask_probs = torch.sigmoid(mask_logits)
 
             class_probs = torch.softmax(
                 class_logits,
@@ -493,10 +497,11 @@ def main(args):
             print("\nclass_probs without void:")
             print(class_probs.shape)
 
-            Mat_Class = class_probs.transpose(1, 2)
+            #Mat_Class = class_probs.transpose(1, 2)
 
-            Mat_Mask = mask_probs.flatten(2)
+            #Mat_Mask = mask_probs.flatten(2)
 
+            """
             print("\nMat_Class shape:")
             print(Mat_Class.shape)
 
@@ -511,6 +516,13 @@ def main(args):
             pixel_logits = pixel_logits.unflatten(
                 2,
                 (IMG_SIZE, IMG_SIZE)
+            )
+            """
+
+            pixel_logits = torch.einsum(
+                "bqc,bqhw->bchw",
+                class_probs,
+                mask_logits
             )
 
             pixel_probs = torch.softmax(pixel_logits, dim=1)
