@@ -388,12 +388,28 @@ def main(args):
             # ====================================================
             # RESIZE IMAGES
             # ====================================================
-
+            """
             images = resize(
                 images,
                 size=[1024, 1024],
                 interpolation=InterpolationMode.BILINEAR,
             )
+            """
+
+            TARGET_H = 512
+            TARGET_W = 1024
+
+            images = resize(
+                images,
+                size=[TARGET_H, TARGET_W],
+                interpolation=InterpolationMode.BILINEAR,
+            )
+
+            semantic_gt = resize(
+                semantic_gt.float(),
+                size=[TARGET_H, TARGET_W],
+                interpolation=InterpolationMode.NEAREST,
+            ).long()
 
             print("\nIMAGES SHAPE AFTER RESIZE:")
             print(images.shape)
@@ -401,13 +417,13 @@ def main(args):
             # ====================================================
             # RESIZE GT
             # ====================================================
-
+            """
             semantic_gt = resize(
                 semantic_gt.float(),
                 size=[1024, 1024],
                 interpolation=InterpolationMode.NEAREST,
             ).long()
-
+            """
             print("\nGT SHAPE AFTER RESIZE:")
             print(semantic_gt.shape)
 
@@ -461,10 +477,17 @@ def main(args):
             # ====================================================
             # UPSAMPLE MASKS
             # ====================================================
-
+            """
             mask_logits = F.interpolate(
                 mask_logits,
                 size=(IMG_SIZE, IMG_SIZE),
+                mode="bilinear",
+                align_corners=False
+            )
+            """
+            mask_logits = F.interpolate(
+                mask_logits,
+                size=(TARGET_H, TARGET_W),
                 mode="bilinear",
                 align_corners=False
             )
@@ -476,7 +499,7 @@ def main(args):
             # QUERY -> PIXEL CONVERSION
             # ====================================================
 
-            #mask_probs = torch.sigmoid(mask_logits)
+            mask_probs = torch.sigmoid(mask_logits)
 
             class_probs = torch.softmax(
                 class_logits,
@@ -497,11 +520,10 @@ def main(args):
             print("\nclass_probs without void:")
             print(class_probs.shape)
 
-            #Mat_Class = class_probs.transpose(1, 2)
+            Mat_Class = class_probs.transpose(1, 2)
 
-            #Mat_Mask = mask_probs.flatten(2)
+            Mat_Mask = mask_probs.flatten(2)
 
-            """
             print("\nMat_Class shape:")
             print(Mat_Class.shape)
 
@@ -512,19 +534,16 @@ def main(args):
                 Mat_Class,
                 Mat_Mask
             )
-
+            """
             pixel_logits = pixel_logits.unflatten(
                 2,
                 (IMG_SIZE, IMG_SIZE)
             )
             """
-
-            pixel_logits = torch.einsum(
-                "bqc,bqhw->bchw",
-                class_probs,
-                mask_logits
+            pixel_logits = pixel_logits.unflatten(
+                2,
+                (TARGET_H, TARGET_W)
             )
-
             pixel_probs = torch.softmax(pixel_logits, dim=1)
 
             max_conf = pixel_probs.max(dim=1)[0]
