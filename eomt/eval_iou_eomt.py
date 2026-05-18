@@ -261,20 +261,20 @@ def main(args):
             # BATCH DEBUG
             # ====================================================
 
-            print("\nBATCH TYPE:")
-            print(type(batch))
+            #print("\nBATCH TYPE:")
+            #print(type(batch))
 
-            print("\nBATCH LENGTH:")
-            print(len(batch))
+            #print("\nBATCH LENGTH:")
+            #print(len(batch))
 
             images_tuple = batch[0]
             targets_tuple = batch[1]
 
-            print("\nIMAGES TUPLE LENGTH:")
-            print(len(images_tuple))
+            #print("\nIMAGES TUPLE LENGTH:")
+            #print(len(images_tuple))
 
-            print("\nTARGETS TUPLE LENGTH:")
-            print(len(targets_tuple))
+            #print("\nTARGETS TUPLE LENGTH:")
+            #print(len(targets_tuple))
 
             # ====================================================
             # STACK IMAGES
@@ -296,9 +296,10 @@ def main(args):
             print("\nFIRST TARGET TYPE:")
             print(type(first_target))
 
-            print("\nFIRST TARGET KEYS:")
-            print(first_target.keys())
+            #print("\nFIRST TARGET KEYS:")
+            #print(first_target.keys())
 
+            """
             for k, v in first_target.items():
 
                 print(f"\nKEY: {k}")
@@ -308,6 +309,7 @@ def main(args):
 
                     print(v.shape)
                     print(v.dtype)
+            """
 
             # ====================================================
             # BUILD SEMANTIC GT FROM INSTANCE MASKS
@@ -320,9 +322,9 @@ def main(args):
                 masks = target["masks"]      # [N, H, W]
                 labels = target["labels"]    # [N]
 
-                print(f"\nIMAGE {idx}")
-                print("Masks shape:", masks.shape)
-                print("Labels:", labels)
+                #print(f"\nIMAGE {idx}")
+                #print("Masks shape:", masks.shape)
+                #print("Labels:", labels)
 
                 H, W = masks.shape[-2:]
 
@@ -363,14 +365,25 @@ def main(args):
             print("\nFINAL GT UNIQUE:")
             print(torch.unique(semantic_gt))
 
+            uniq_gt, counts_gt = torch.unique(
+                semantic_gt,
+                return_counts=True
+            )
+
+            print("\nGT DISTRIBUTION:")
+
+            for u, c in zip(uniq_gt, counts_gt):
+
+                print(f"class {u.item()} -> {c.item()}")
+
             # ====================================================
             # NORMALIZE IMAGES
             # ====================================================
 
             images = images.float() / 255.0
 
-            print("\nIMAGES MIN/MAX BEFORE RESIZE:")
-            print(images.min(), images.max())
+            #print("\nIMAGES MIN/MAX BEFORE RESIZE:")
+            #print(images.min(), images.max())
 
             # ====================================================
             # RESIZE IMAGES
@@ -410,8 +423,8 @@ def main(args):
             # FORWARD
             # ====================================================
 
-            print("\nCUDA MEMORY BEFORE FORWARD:")
-            print(torch.cuda.memory_allocated() / 1024**3, "GB")
+            #print("\nCUDA MEMORY BEFORE FORWARD:")
+            #print(torch.cuda.memory_allocated() / 1024**3, "GB")
 
             result = model(images)
 
@@ -432,12 +445,12 @@ def main(args):
             print(class_logits.min().item())
             print(class_logits.max().item())
 
-            print("\nNaN checks:")
-            print(torch.isnan(mask_logits).any())
-            print(torch.isnan(class_logits).any())
+            #print("\nNaN checks:")
+            #print(torch.isnan(mask_logits).any())
+            #print(torch.isnan(class_logits).any())
 
-            print("\nCUDA MEMORY AFTER FORWARD:")
-            print(torch.cuda.memory_allocated() / 1024**3, "GB")
+            #print("\nCUDA MEMORY AFTER FORWARD:")
+            #print(torch.cuda.memory_allocated() / 1024**3, "GB")
 
             # ====================================================
             # UPSAMPLE MASKS
@@ -470,6 +483,11 @@ def main(args):
             # REMOVE VOID / NO-OBJECT CLASS
             class_probs = class_probs[..., :-1]
 
+            print("\nCLASS PROBS STATS:")
+            print(class_probs.min().item())
+            print(class_probs.max().item())
+            print(class_probs.mean().item())
+
             print("\nclass_probs without void:")
             print(class_probs.shape)
 
@@ -493,6 +511,15 @@ def main(args):
                 (IMG_SIZE, IMG_SIZE)
             )
 
+            pixel_probs = torch.softmax(pixel_logits, dim=1)
+
+            max_conf = pixel_probs.max(dim=1)[0]
+
+            print("\nCONFIDENCE STATS:")
+            print("min:", max_conf.min().item())
+            print("max:", max_conf.max().item())
+            print("mean:", max_conf.mean().item())
+
             print("\npixel_logits shape:")
             print(pixel_logits.shape)
 
@@ -513,8 +540,8 @@ def main(args):
                 keepdim=True
             )
 
-            print("\nPrediction unique:")
-            print(torch.unique(prediction))
+            #print("\nPrediction unique:")
+            #print(torch.unique(prediction))
 
             print("\nPrediction distribution:")
 
@@ -539,11 +566,11 @@ def main(args):
             print("semantic_gt shape:")
             print(semantic_gt.shape)
 
-            print("\nprediction dtype:")
-            print(prediction.dtype)
+            #print("\nprediction dtype:")
+            #print(prediction.dtype)
 
-            print("semantic_gt dtype:")
-            print(semantic_gt.dtype)
+            #print("semantic_gt dtype:")
+            #print(semantic_gt.dtype)
 
             print("\nprediction min/max:")
             print(prediction.min())
