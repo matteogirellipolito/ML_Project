@@ -380,7 +380,9 @@ def main(args):
             # NORMALIZE IMAGES
             # ====================================================
 
-            images = images.float() / 255.0
+            #images = images.float() / 255.0
+
+            images = images.float()
 
             #print("\nIMAGES MIN/MAX BEFORE RESIZE:")
             #print(images.min(), images.max())
