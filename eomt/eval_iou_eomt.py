@@ -101,6 +101,52 @@ def load_my_state_dict(model, state_dict):
 
             continue
 
+        # ==========================================================
+        # POSITIONAL EMBEDDING INTERPOLATION
+        # ==========================================================
+
+        if name == "encoder.backbone.pos_embed":
+
+            print("\n[INTERPOLATING POS EMBED]")
+
+            old_pos = param
+            new_pos = own_state[name]
+
+            old_tokens = old_pos.shape[1]
+            new_tokens = new_pos.shape[1]
+
+            old_h = 64
+            old_w = 64
+
+            new_h = 64
+            new_w = 128
+
+            old_pos = old_pos.reshape(
+                1,
+                old_h,
+                old_w,
+                -1
+            ).permute(0, 3, 1, 2)
+
+            old_pos = F.interpolate(
+                old_pos,
+                size=(new_h, new_w),
+                mode="bicubic",
+                align_corners=False
+            )
+
+            old_pos = old_pos.permute(
+                0, 2, 3, 1
+            ).reshape(
+                1,
+                new_h * new_w,
+                -1
+            )
+
+            param = old_pos
+
+            print(f"Interpolated: {old_tokens} -> {new_tokens}")
+
         if own_state[name].shape != param.shape:
 
             mismatched.append({
