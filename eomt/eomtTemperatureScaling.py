@@ -144,11 +144,11 @@ def main(args):
 
         anomaly_scores = np.array(temperature_results[temp])
 
-        ood_mask = ood_gts[temp] == 1
-        ind_mask = ood_gts[temp] == 0
+        ood_mask = ood_gts == 1
+        ind_mask = ood_gts == 0
 
-        ood_out = anomaly_scores[ood_mask]
-        ind_out = anomaly_scores[ind_mask]
+        ood_out = anomaly_scores[ood_mask[temp]]
+        ind_out = anomaly_scores[ind_mask[temp]]
 
         ood_label = np.ones(len(ood_out))
         ind_label = np.zeros(len(ind_out))
