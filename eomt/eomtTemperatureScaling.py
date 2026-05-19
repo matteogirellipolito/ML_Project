@@ -136,7 +136,6 @@ def main(args):
             continue
 
         ood_gts_list.append(ood_gts)
-        anomaly_score_list.append(anomaly_result)
 
     ood_gts = np.array(ood_gts_list)
 
@@ -147,8 +146,8 @@ def main(args):
         ood_mask = ood_gts == 1
         ind_mask = ood_gts == 0
 
-        ood_out = anomaly_scores[ood_mask[temp]]
-        ind_out = anomaly_scores[ind_mask[temp]]
+        ood_out = anomaly_scores[ood_mask]
+        ind_out = anomaly_scores[ind_mask]
 
         ood_label = np.ones(len(ood_out))
         ind_label = np.zeros(len(ind_out))
