@@ -109,7 +109,7 @@ def main(args):
 
         pathGT = path.replace("images","labels_masks")
 
-        if "RoadObstacle21" in pathGT:
+        if "RoadObsticle21" in pathGT:
             pathGT = pathGT.replace("webp","png")
         if "fs_static" in pathGT:
             pathGT = pathGT.replace("jpg","png")
@@ -125,7 +125,7 @@ def main(args):
         if "LostAndFound" in pathGT:
             ood_gts = np.where((ood_gts == 0),255,ood_gts)
             ood_gts = np.where((ood_gts == 1),0,ood_gts)
-            ood_gts = np.where((ood_gts > 1) & (ood_gts < 201),1,ood_gts)
+            ood_gts = np.where((ood_gts > 1)&(ood_gts < 201),1,ood_gts)
 
         if "Streethazard" in pathGT:
             ood_gts = np.where((ood_gts == 14),255,ood_gts)
@@ -144,8 +144,8 @@ def main(args):
 
         anomaly_scores = np.array(temperature_results[temp])
 
-        ood_mask = ood_gts == 1
-        ind_mask = ood_gts == 0
+        ood_mask = ood_gts[temp] == 1
+        ind_mask = ood_gts[temp] == 0
 
         ood_out = anomaly_scores[ood_mask]
         ind_out = anomaly_scores[ind_mask]
@@ -178,7 +178,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint",type=str,default="/content/drive/MyDrive/ML_Project/eomt_cityscapes.bin")
 
     parser.add_argument("--temperatures",type=float,nargs="+",default=[0.5, 0.75, 1.0, 1.1])
-    
+
     parser.add_argument("--cpu",action="store_true")
 
     args = parser.parse_args()
