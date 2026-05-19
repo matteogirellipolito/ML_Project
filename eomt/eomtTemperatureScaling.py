@@ -66,8 +66,8 @@ def main(args):
 
     print('Model weights loaded succesfully')
 
-    anomaly_score_list = []
     ood_gts_list = []
+    temperature_results = {}
 
     image_paths = glob.glob(os.path.expanduser(str(args.input[0])))
 
@@ -94,8 +94,6 @@ def main(args):
                 crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
 
                 logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
-
-        temperature_results = {}
 
         for temp in args.temperatures:
             scaled_logits = logits[0] / temp
