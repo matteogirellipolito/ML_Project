@@ -95,10 +95,17 @@ def main(args):
 
                 logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
 
-        scaled_logits = logits[0] / args.temperature
-        softmax_probs = torch.softmax(scaled_logits,dim=0)
-        msp_map = 1.0 - torch.max(softmax_probs,dim=0)[0]
-        anomaly_result = msp_map.cpu().numpy()
+        temperature_results = {}
+
+        for temp in args.temperatures:
+            scaled_logits = logits[0] / temp
+            softmax_probs = torch.softmax(scaled_logits,dim=0)
+            msp_map = 1.0 - torch.max(softmax_probs,dim=0)[0]
+            anomaly_result = msp_map.cpu().numpy()
+
+            if temp not in temperature_results:
+                temperature_results[temp] = []
+            temperature_results[temp].append(anomaly_result)
 
         pathGT = path.replace("images","labels_masks")
 
@@ -132,26 +139,29 @@ def main(args):
         anomaly_score_list.append(anomaly_result)
 
     ood_gts = np.array(ood_gts_list)
-    anomaly_scores = np.array(anomaly_score_list)
 
-    ood_mask = ood_gts == 1
-    ind_mask = ood_gts == 0
+    for temp in args.temperatures:
 
-    ood_out = anomaly_scores[ood_mask]
-    ind_out = anomaly_scores[ind_mask]
+        anomaly_scores = np.array(temperature_results[temp])
 
-    ood_label = np.ones(len(ood_out))
-    ind_label = np.zeros(len(ind_out))
+        ood_mask = ood_gts == 1
+        ind_mask = ood_gts == 0
 
-    val_out = np.concatenate((ind_out, ood_out))
-    val_label = np.concatenate((ind_label, ood_label))
+        ood_out = anomaly_scores[ood_mask]
+        ind_out = anomaly_scores[ind_mask]
 
-    prc_auc = average_precision_score(val_label,val_out)
-    fpr = fpr_at_95_tpr(val_out,val_label)
+        ood_label = np.ones(len(ood_out))
+        ind_label = np.zeros(len(ind_out))
 
-    print(f"Temperature: {args.temperature}")
-    print(f"AUPRC score: {prc_auc * 100.0}")
-    print(f"FPR@TPR95: {fpr * 100.0}")
+        val_out = np.concatenate((ind_out, ood_out))
+        val_label = np.concatenate((ind_label, ood_label))
+
+        prc_auc = average_precision_score(val_label,val_out)
+        fpr = fpr_at_95_tpr(val_out,val_label)
+
+        print(f"\nTemperature: {temp}")
+        print(f"AUPRC score: {prc_auc * 100.0}")
+        print(f"FPR@TPR95: {fpr * 100.0}\n")
 
 if __name__ == "__main__":
 
@@ -167,8 +177,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--checkpoint",type=str,default="/content/drive/MyDrive/ML_Project/eomt_cityscapes.bin")
 
-    parser.add_argument("--temperature",type=float,default=1.0)
-
+    parser.add_argument("--temperatures",type=float,nargs="+",default=[0.5, 0.75, 1.0, 1.1])
+    
     parser.add_argument("--cpu",action="store_true")
 
     args = parser.parse_args()
