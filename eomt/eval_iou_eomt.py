@@ -89,7 +89,7 @@ def main(args):
 
     start = time.time()
 
-    for step, (image, labels, filename) in enumerate(loader):
+    for step, (image, labels, filename,filenameGt) in enumerate(loader):
         image = image.to(device)
         labels = labels.long().to(device)
 
