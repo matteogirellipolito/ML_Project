@@ -157,6 +157,14 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
 
+    parser.add_argument(
+        "--input",
+        default="/home/shyam/Mask2Former/unk-eval/RoadObsticle21/images/*.webp",
+        nargs="+",
+        help="A list of space separated input images; "
+        "or a single glob pattern such as 'directory/*.jpg'",
+    )  
+
     parser.add_argument("--checkpoint",type=str,default="/content/drive/MyDrive/ML_Project/eomt_cityscapes.bin")
 
     parser.add_argument("--temperature",type=float,default=1.0)
