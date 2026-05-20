@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import Compose,ToTensor
 from torchvision.transforms import ToPILImage
 import torch.nn.functional as F
+from torch.amp import autocast
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) 
 from eval.dataset import cityscapes
@@ -97,14 +98,13 @@ def main(args):
             image = image.squeeze(0)
             image = [(image * 255).to(torch.uint8)]
             img_sizes = [img.shape[-2:] for img in image]
-        
-            crops, origins = model.window_imgs_semantic(image)
 
-            mask_logits_per_layer, class_logits_per_layer = model(crops)
-            mask_logits = F.interpolate(mask_logits_per_layer[-1], (IMG_SIZE, IMG_SIZE), mode="bilinear")
-        
-            crop_logits = model.to_per_pixel_logits_semantic(mask_logits, class_logits_per_layer[-1])
-            logits = model.revert_window_logits_semantic(crop_logits, origins, img_sizes)
+            with autocast(dtype=torch.float16, device_type="cuda"):
+                crops, origins = model.window_imgs_semantic(image)
+                mask_logits_per_layer, class_logits_per_layer = model(crops)
+                mask_logits = F.interpolate(mask_logits_per_layer[-1], (IMG_SIZE, IMG_SIZE), mode="bilinear")
+                crop_logits = model.to_per_pixel_logits_semantic(mask_logits, class_logits_per_layer[-1])
+                logits = model.revert_window_logits_semantic(crop_logits, origins, img_sizes)
 
         prediction = logits[0].max(0)[1].unsqueeze(0).unsqueeze(0)
 

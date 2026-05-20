@@ -9,12 +9,12 @@ import torch.nn.functional as F
 
 from PIL import Image
 from argparse import ArgumentParser
-from torch.amp import autocast
 
 from sklearn.metrics import average_precision_score
 from ood_metrics import fpr_at_95_tpr
 
 from torchvision.transforms import ToTensor
+from torch.amp import autocast
 
 random.seed(42)
 np.random.seed(42)
@@ -85,11 +85,12 @@ def main(args):
             image = [image.to(device)]
             img_sizes = [img.shape[-2:] for img in image]
 
-            crops, origins = model.window_imgs_semantic(image)
-            mask_logits_per_layer, class_logits_per_layer = model(crops)
-            mask_logits = F.interpolate(mask_logits_per_layer[-1],(IMG_SIZE, IMG_SIZE),mode="bilinear")
-            crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
-            logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
+            with autocast(dtype=torch.float16, device_type="cuda"):
+                crops, origins = model.window_imgs_semantic(image)
+                mask_logits_per_layer, class_logits_per_layer = model(crops)
+                mask_logits = F.interpolate(mask_logits_per_layer[-1],(IMG_SIZE, IMG_SIZE),mode="bilinear")
+                crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
+                logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
 
         pathGT = path.replace("images","labels_masks")
 
@@ -129,7 +130,7 @@ def main(args):
             results_per_temp[temp]["ind"].append(anomaly_result[ind_mask])
 
         del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer, anomaly_result, softmax_probs, scaled_logits
-        del ood_gts, mask
+        del ood_gts, mask, crops, origins, image
         torch.cuda.empty_cache()
 
     for temp in args.temperatures:
