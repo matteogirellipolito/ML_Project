@@ -120,6 +120,8 @@ def main(args):
 
         ood_gts_list.append(ood_gts)
 
+        del ood_gts, mask
+
         for temp in args.temperatures:
             scaled_logits = logits[0] / temp
             softmax_probs = torch.softmax(scaled_logits,dim=0)
@@ -129,6 +131,9 @@ def main(args):
             if temp not in temperature_results:
                 temperature_results[temp] = []
             temperature_results[temp].append(anomaly_result)
+
+        del logits, mask_logits, crop_logits, mask_logits_per_layer, class_logits_per_layer
+        torch.cuda.empty_cache()
 
     ood_gts = np.array(ood_gts_list)
 
