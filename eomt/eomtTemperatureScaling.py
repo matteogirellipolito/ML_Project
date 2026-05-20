@@ -66,13 +66,14 @@ def main(args):
 
     print('Model weights loaded succesfully')
 
-    ood_gts_list = []
-    temperature_results = {}
+    results_per_temp = {}
+
+    for temp in args.temperatures:
+        results_per_temp[temp] = {"ood": [],"ind": []}
 
     image_paths = glob.glob(os.path.expanduser(str(args.input[0])))
 
     for path in image_paths:
-
         print(path)
         image = Image.open(path).convert("RGB")
         image = input_transform(image)
@@ -104,12 +105,10 @@ def main(args):
 
         if "RoadAnomaly" in pathGT:
             ood_gts = np.where((ood_gts == 2),1,ood_gts)
-
         if "LostAndFound" in pathGT:
             ood_gts = np.where((ood_gts == 0),255,ood_gts)
             ood_gts = np.where((ood_gts == 1),0,ood_gts)
-            ood_gts = np.where((ood_gts > 1)&(ood_gts < 201),1,ood_gts)
-
+            ood_gts = np.where((ood_gts > 1) & (ood_gts < 201),1,ood_gts)
         if "Streethazard" in pathGT:
             ood_gts = np.where((ood_gts == 14),255,ood_gts)
             ood_gts = np.where((ood_gts < 20),0,ood_gts)
@@ -118,41 +117,28 @@ def main(args):
         if 1 not in np.unique(ood_gts):
             continue
 
-        ood_gts_list.append(ood_gts)
-
-        del ood_gts, mask
+        ood_mask = (ood_gts == 1)
+        ind_mask = (ood_gts == 0)
 
         for temp in args.temperatures:
             scaled_logits = logits[0] / temp
             softmax_probs = torch.softmax(scaled_logits,dim=0)
             msp_map = 1.0 - torch.max(softmax_probs,dim=0)[0]
             anomaly_result = msp_map.cpu().numpy()
+            results_per_temp[temp]["ood"].append(anomaly_result[ood_mask])
+            results_per_temp[temp]["ind"].append(anomaly_result[ind_mask])
 
-            if temp not in temperature_results:
-                temperature_results[temp] = []
-            temperature_results[temp].append(anomaly_result)
-
-        del logits, mask_logits, crop_logits, mask_logits_per_layer, class_logits_per_layer
+        del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer, anomaly_result, softmax_probs, scaled_logits
+        del ood_gts, mask
         torch.cuda.empty_cache()
 
-    ood_gts = np.array(ood_gts_list)
-
     for temp in args.temperatures:
-
-        anomaly_scores = np.array(temperature_results[temp])
-
-        ood_mask = ood_gts == 1
-        ind_mask = ood_gts == 0
-
-        ood_out = anomaly_scores[ood_mask]
-        ind_out = anomaly_scores[ind_mask]
-
+        ood_out = np.concatenate(results_per_temp[temp]["ood"])
+        ind_out = np.concatenate(results_per_temp[temp]["ind"])
         ood_label = np.ones(len(ood_out))
         ind_label = np.zeros(len(ind_out))
-
         val_out = np.concatenate((ind_out, ood_out))
         val_label = np.concatenate((ind_label, ood_label))
-
         prc_auc = average_precision_score(val_label,val_out)
         fpr = fpr_at_95_tpr(val_out,val_label)
 
