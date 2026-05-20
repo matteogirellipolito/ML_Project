@@ -84,26 +84,11 @@ def main(args):
             image = [image.to(device)]
             img_sizes = [img.shape[-2:] for img in image]
 
-            with autocast(dtype=torch.float16,device_type="cuda"):
-
-                crops, origins = model.window_imgs_semantic(image)
-
-                mask_logits_per_layer, class_logits_per_layer = model(crops)
-                mask_logits = F.interpolate(mask_logits_per_layer[-1],(IMG_SIZE, IMG_SIZE),mode="bilinear")
-
-                crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
-
-                logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
-
-        for temp in args.temperatures:
-            scaled_logits = logits[0] / temp
-            softmax_probs = torch.softmax(scaled_logits,dim=0)
-            msp_map = 1.0 - torch.max(softmax_probs,dim=0)[0]
-            anomaly_result = msp_map.cpu().numpy()
-
-            if temp not in temperature_results:
-                temperature_results[temp] = []
-            temperature_results[temp].append(anomaly_result)
+            crops, origins = model.window_imgs_semantic(image)
+            mask_logits_per_layer, class_logits_per_layer = model(crops)
+            mask_logits = F.interpolate(mask_logits_per_layer[-1],(IMG_SIZE, IMG_SIZE),mode="bilinear")
+            crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
+            logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
 
         pathGT = path.replace("images","labels_masks")
 
@@ -134,6 +119,16 @@ def main(args):
             continue
 
         ood_gts_list.append(ood_gts)
+
+        for temp in args.temperatures:
+            scaled_logits = logits[0] / temp
+            softmax_probs = torch.softmax(scaled_logits,dim=0)
+            msp_map = 1.0 - torch.max(softmax_probs,dim=0)[0]
+            anomaly_result = msp_map.cpu().numpy()
+
+            if temp not in temperature_results:
+                temperature_results[temp] = []
+            temperature_results[temp].append(anomaly_result)
 
     ood_gts = np.array(ood_gts_list)
 
