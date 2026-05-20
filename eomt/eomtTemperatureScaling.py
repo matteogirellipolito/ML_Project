@@ -123,13 +123,13 @@ def main(args):
 
         for temp in args.temperatures:
             scaled_logits = logits[0] / temp
-            softmax_probs = torch.softmax(scaled_logits,dim=0)
-            msp_map = 1.0 - torch.max(softmax_probs,dim=0)[0]
+            scaled_logits = scaled_logits.float()
+            msp_map = 1.0 - torch.softmax(scaled_logits,dim=0).max(dim=0)[0]
             anomaly_result = msp_map.cpu().numpy()
             results_per_temp[temp]["ood"].append(anomaly_result[ood_mask])
             results_per_temp[temp]["ind"].append(anomaly_result[ind_mask])
 
-        del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer, anomaly_result, softmax_probs, scaled_logits
+        del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer, anomaly_result, scaled_logits
         del ood_gts, mask, crops, origins, image
         torch.cuda.empty_cache()
 
