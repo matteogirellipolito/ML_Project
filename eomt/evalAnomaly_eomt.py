@@ -74,8 +74,6 @@ def main(args):
 
     for method in methods:
 
-        print(f"\nRunning method: {method}\n")
-
         scores_list = []
         labels_list = []
 
