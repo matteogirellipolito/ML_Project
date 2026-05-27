@@ -69,10 +69,10 @@ def main(args):
     print('Model weights loaded succesfully')
 
     results_per_method = {
-        "MSP": {"ood": [], "ind": []},
-        "MaxLogit": {"ood": [], "ind": []},
-        "MaxEntropy": {"ood": [], "ind": []},
-        "RbA": {"ood": [], "ind": []},
+        "MSP": {"scores": [], "labels": []},
+        "MaxLogit": {"scores": [], "labels": []},
+        "MaxEntropy": {"scores": [], "labels": []},
+        "RbA": {"scores": [], "labels": []},
     }
 
     image_paths = glob.glob(os.path.expanduser(str(args.input[0])))
@@ -131,35 +131,46 @@ def main(args):
         msp_map = 1.0 - torch.softmax(logits_map, dim=0).max(dim=0)[0]
         msp_result = msp_map.cpu().numpy()
 
-        results_per_method["MSP"]["ood"].append(msp_result[ood_mask])
-        results_per_method["MSP"]["ind"].append(msp_result[ind_mask])
+        msp_scores = np.concatenate((msp_result[ind_mask], msp_result[ood_mask]))
+        msp_labels = np.concatenate((np.zeros(np.sum(ind_mask)),np.ones(np.sum(ood_mask))))
+
+        results_per_method["MSP"]["scores"].append(msp_scores)
+        results_per_method["MSP"]["labels"].append(msp_labels)
 
         # MaxLogit
         maxlogit_map = -torch.max(logits_map, dim=0)[0]
         maxlogit_result = maxlogit_map.cpu().numpy()
 
-        results_per_method["MaxLogit"]["ood"].append(maxlogit_result[ood_mask])
-        results_per_method["MaxLogit"]["ind"].append(maxlogit_result[ind_mask])
+        maxlogit_scores = np.concatenate((maxlogit_result[ind_mask], maxlogit_result[ood_mask]))
+        maxlogit_labels = np.concatenate((np.zeros(np.sum(ind_mask)),np.ones(np.sum(ood_mask))))
+
+        results_per_method["MaxLogit"]["scores"].append(maxlogit_scores)
+        results_per_method["MaxLogit"]["labels"].append(maxlogit_labels)
 
         # MaxEntropy
         softmax_probs = torch.softmax(logits_map, dim=0)
         entropy_map = -torch.sum(softmax_probs * torch.log(softmax_probs + 1e-12),dim=0)
-
         entropy_result = entropy_map.cpu().numpy()
 
-        results_per_method["MaxEntropy"]["ood"].append(entropy_result[ood_mask])
-        results_per_method["MaxEntropy"]["ind"].append(entropy_result[ind_mask])
+        entropy_scores = np.concatenate((entropy_result[ind_mask], entropy_result[ood_mask]))
+        entropy_labels = np.concatenate((np.zeros(np.sum(ind_mask)),np.ones(np.sum(ood_mask))))
+
+        results_per_method["MaxEntropy"]["scores"].append(entropy_scores)
+        results_per_method["MaxEntropy"]["labels"].append(entropy_labels)
 
         # RbA
-
         rba_map = -torch.tanh(logits_map).sum(dim=0)
         rba_result = rba_map.cpu().numpy()
 
-        results_per_method["RbA"]["ood"].append(rba_result[ood_mask])
-        results_per_method["RbA"]["ind"].append(rba_result[ind_mask])
+        rba_scores = np.concatenate((rba_result[ind_mask], rba_result[ood_mask]))
+        rba_labels = np.concatenate((np.zeros(np.sum(ind_mask)),np.ones(np.sum(ood_mask))))
+
+        results_per_method["RbA"]["scores"].append(rba_scores)
+        results_per_method["RbA"]["labels"].append(rba_labels)
 
         del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer
         del logits_map, msp_map, msp_result, maxlogit_map, maxlogit_result, softmax_probs, entropy_map, entropy_result, rba_map, rba_result
+        del msp_scores, msp_labels, maxlogit_scores, maxlogit_labels, entropy_scores, entropy_labels, rba_scores, rba_labels
         del ood_gts, mask, crops, origins, image
         del img_sizes, ood_mask, ind_mask
         torch.cuda.empty_cache()
@@ -167,14 +178,8 @@ def main(args):
 
     for method in results_per_method:
 
-        ood_out = np.concatenate(results_per_method[method]["ood"])
-        ind_out = np.concatenate(results_per_method[method]["ind"])
-
-        ood_label = np.ones(len(ood_out))
-        ind_label = np.zeros(len(ind_out))
-
-        val_out = np.concatenate((ind_out, ood_out))
-        val_label = np.concatenate((ind_label, ood_label))
+        val_out = np.concatenate(results_per_method[method]["scores"])
+        val_label = np.concatenate(results_per_method[method]["labels"])
 
         prc_auc = average_precision_score(val_label, val_out)
         fpr = fpr_at_95_tpr(val_out, val_label)
@@ -183,7 +188,7 @@ def main(args):
         print(f"AUPRC score: {prc_auc * 100.0}")
         print(f"FPR@TPR95: {fpr * 100.0}\n")
 
-        del ood_out, ind_out, ood_label, ind_label, val_out, val_label
+        del val_out, val_label
 
 if __name__ == "__main__":
 
