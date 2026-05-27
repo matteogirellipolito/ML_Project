@@ -96,6 +96,8 @@ def main(args):
                 crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
                 logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
 
+        del crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer, crops, origins, img_sizes
+
         pathGT = path.replace("images","labels_masks")
 
         if "RoadObsticle21" in pathGT:
@@ -126,6 +128,9 @@ def main(args):
         ind_mask = (ood_gts == 0)
 
         logits_map = logits[0].float()
+        logits_map = logits[0].half()
+
+        del logits, ood_gts, mask, image
 
         # MSP
         msp_map = 1.0 - torch.softmax(logits_map, dim=0).max(dim=0)[0]
@@ -137,6 +142,8 @@ def main(args):
         results_per_method["MSP"]["scores"].append(msp_scores)
         results_per_method["MSP"]["labels"].append(msp_labels)
 
+        del msp_map, msp_result, msp_scores, msp_labels
+
         # MaxLogit
         maxlogit_map = -torch.max(logits_map, dim=0)[0]
         maxlogit_result = maxlogit_map.cpu().numpy()
@@ -146,6 +153,8 @@ def main(args):
 
         results_per_method["MaxLogit"]["scores"].append(maxlogit_scores)
         results_per_method["MaxLogit"]["labels"].append(maxlogit_labels)
+
+        del maxlogit_map, maxlogit_result, maxlogit_scores, maxlogit_labels
 
         # MaxEntropy
         softmax_probs = torch.softmax(logits_map, dim=0)
@@ -158,6 +167,8 @@ def main(args):
         results_per_method["MaxEntropy"]["scores"].append(entropy_scores)
         results_per_method["MaxEntropy"]["labels"].append(entropy_labels)
 
+        del softmax_probs, entropy_map, entropy_result, entropy_scores, entropy_labels
+
         # RbA
         rba_map = -torch.tanh(logits_map).sum(dim=0)
         rba_result = rba_map.cpu().numpy()
@@ -167,12 +178,10 @@ def main(args):
 
         results_per_method["RbA"]["scores"].append(rba_scores)
         results_per_method["RbA"]["labels"].append(rba_labels)
-
-        del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer
-        del logits_map, msp_map, msp_result, maxlogit_map, maxlogit_result, softmax_probs, entropy_map, entropy_result, rba_map, rba_result
-        del msp_scores, msp_labels, maxlogit_scores, maxlogit_labels, entropy_scores, entropy_labels, rba_scores, rba_labels
-        del ood_gts, mask, crops, origins, image
-        del img_sizes, ood_mask, ind_mask
+        
+        del logits_map
+        del rba_map, rba_result, rba_scores, rba_labels
+        del ood_mask, ind_mask
         torch.cuda.empty_cache()
         gc.collect()
 
