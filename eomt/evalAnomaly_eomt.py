@@ -1,383 +1,169 @@
-# Copyright (c) OpenMMLab. All rights reserved.
-
 import os
-import cv2
-import yaml
 import glob
+import yaml
 import torch
 import random
-import warnings
 import importlib
 import numpy as np
-import os.path as osp
+import torch.nn.functional as F
 
 from PIL import Image
 from argparse import ArgumentParser
 
-from models.eomt import EoMT
-from models.vit import ViT
+from sklearn.metrics import average_precision_score
+from ood_metrics import fpr_at_95_tpr
 
-from ood_metrics import (
-    fpr_at_95_tpr,
-    calc_metrics,
-    plot_roc,
-    plot_pr,
-    plot_barcode,
-)
+from torchvision.transforms import ToTensor
+from torch.amp import autocast
 
-from sklearn.metrics import (
-    roc_auc_score,
-    roc_curve,
-    auc,
-    precision_recall_curve,
-    average_precision_score,
-)
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(42)
+    torch.cuda.manual_seed_all(42)
 
-from torchvision.transforms import (
-    Compose,
-    Resize,
-    ToTensor,
-    Normalize,
-)
-
-import torch.nn.functional as F
-
-
-seed = 42
-
-# general reproducibility
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-
-NUM_CHANNELS = 3
-NUM_CLASSES = 19
-
-# gpu training specific
 torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.benchmark = False
 
-# image preprocessing
-input_transform = Compose([
-    Resize((1024, 1024), Image.BILINEAR),
-    ToTensor(),
-        # Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]), # Standard ImageNet/DINO
-])
+IMG_SIZE = 1024
 
-target_transform = Compose([
-    Resize((512, 1024), Image.NEAREST),
-])
+input_transform = ToTensor()
 
+def main(args):
 
-## MODEL LOADING 
-
-def load_my_state_dict(model, state_dict):
-
-    model_state = model.state_dict()
-
-    loaded_keys = []
-    skipped_keys = []
-
-    for name, param in state_dict.items():
-
-        # remove DataParallel prefix
-        if name.startswith("module."):
-            name = name[len("module."):]
-
-        if name not in model_state:
-            skipped_keys.append(name)
-            continue
-
-        if model_state[name].shape != param.shape:
-            print(
-                f"Shape mismatch for {name}: "
-                f"{param.shape} vs {model_state[name].shape}"
-            )
-            skipped_keys.append(name)
-            continue
-
-        model_state[name].copy_(param)
-        loaded_keys.append(name)
-
-    print(f"\nLoaded keys: {len(loaded_keys)}")
-    print(f"Skipped keys: {len(skipped_keys)}")
-
-    if len(skipped_keys) > 0:
-        print("\nFirst skipped keys:")
-        for k in skipped_keys[:20]:
-            print(k)
-
-    return model
-
-# extract state_dict from checkpoint 
-def extract_state_dict(checkpoint):
-
-    if isinstance(checkpoint, dict):
-
-        if "state_dict" in checkpoint:
-            return checkpoint["state_dict"]
-
-        if "model" in checkpoint:
-            return checkpoint["model"]
-
-    return checkpoint
-
-# funtion to load eomt model
-def load_eomt(args, device):
-
-    yaml_path = osp.join(args.loadConfigDir, args.loadConfig)
-
-    with open(yaml_path, "r") as f:
-        config = yaml.safe_load(f)
-
-    print(f"Loading config from: {yaml_path}")
+    use_cuda = (not args.cpu) and torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
     
-    network_cfg = (
-        config["model"]
-        ["init_args"]
-        ["network"]
-        ["init_args"]
-    )
+    config_path = 'configs/dinov2/cityscapes/semantic/eomt_base_640.yaml'
+    config = yaml.safe_load(open(config_path))
 
-    encoder_cfg = (
-        network_cfg
-        ["encoder"]
-        ["init_args"]
-    )
+    encoder_cfg = config["model"]["init_args"]["network"]["init_args"]["encoder"]
+    encoder_module_name, encoder_class_name = encoder_cfg["class_path"].rsplit(".", 1)
+    encoder_cls = getattr(importlib.import_module(encoder_module_name), encoder_class_name)
+    encoder = encoder_cls(img_size=(IMG_SIZE, IMG_SIZE), **encoder_cfg.get("init_args", {}))
 
-    backbone_name = encoder_cfg["backbone_name"]
+    network_cfg = config["model"]["init_args"]["network"]
+    network_module_name, network_class_name = network_cfg["class_path"].rsplit(".", 1)
+    network_cls = getattr(importlib.import_module(network_module_name), network_class_name)
+    network_kwargs = {k: v for k, v in network_cfg["init_args"].items() if k != "encoder"}
+    network = network_cls(masked_attn_enabled=False,num_classes=19,encoder=encoder,**network_kwargs)
 
-    num_queries = network_cfg["num_q"]
+    lit_module_name, lit_class_name = config["model"]["class_path"].rsplit(".", 1)
+    lit_cls = getattr(importlib.import_module(lit_module_name), lit_class_name)
+    model_kwargs = {k: v for k, v in config["model"]["init_args"].items() if k != "network"}
+    if "stuff_classes" in config["data"].get("init_args", {}):
+        model_kwargs["stuff_classes"] = config["data"]["init_args"]["stuff_classes"]
 
-    num_blocks = network_cfg["num_blocks"]
+    model = lit_cls(img_size=(IMG_SIZE, IMG_SIZE),num_classes=19,network=network,**model_kwargs).eval().to(device)
 
-    img_size=(1024, 1024) #or (512, 1024) ????
+    if device.type == 'cpu':
+        state_dict = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+    else:
+        state_dict = torch.load(args.checkpoint, map_location=f"cuda:{0}", weights_only=True)
 
-    print(f"Backbone: {backbone_name}")
-    print(f"Num queries: {num_queries}")
-    print(f"Num blocks: {num_blocks}")
+    model.load_state_dict(state_dict, strict=False)
 
-    encoder = ViT(
-        img_size=img_size,
-        patch_size=16,
-        backbone_name=backbone_name,
-    )
+    print('Model weights loaded succesfully')
 
-    model = EoMT(
-        encoder=encoder,
-        num_classes=NUM_CLASSES,
-        num_q=num_queries,
-        num_blocks=num_blocks,
-        masked_attn_enabled=True,
-    ).to(device)
+    results_per_method = {
+        "MSP": {"ood": [], "ind": []},
+        "MaxLogit": {"ood": [], "ind": []},
+        "MaxEntropy": {"ood": [], "ind": []},
+        "RbA": {"ood": [], "ind": []},
+    }
 
-    state_dict_path = args.loadWeights
+    image_paths = glob.glob(os.path.expanduser(str(args.input[0])))
 
-    print(f"Loading checkpoint from: {state_dict_path}")
-
-    checkpoint = torch.load(
-        state_dict_path,
-        map_location=device
-    )
-
-    checkpoint = extract_state_dict(checkpoint)
-
-    model = load_my_state_dict(model, checkpoint)
-
-    model.eval()
-
-    return model
-
-
-#MAIN
-
-def main():
-
-    parser = ArgumentParser()
-
-    parser.add_argument(
-        "--input",
-        default="/home/shyam/Mask2Former/unk-eval/RoadObsticle21/images/*.webp",
-        nargs="+",
-        help=(
-            "A list of space separated input images; "
-            "or a single glob pattern such as 'directory/*.jpg'"
-        ),
-    )
-
-    parser.add_argument('--loadDir', default="../eomt")
-    parser.add_argument('--loadModel', default="eomt.py")
-
-    parser.add_argument('--loadConfigDir', default='../eomt/configs/dinov2/cityscapes/semantic/')
-    parser.add_argument('--loadConfig', default='eomt_base_640.yaml')
-    parser.add_argument('--loadWeights',default='/content/drive/MyDrive/eomt_cityscapes.bin')
-
-    parser.add_argument('--subset', default="val")
-
-    parser.add_argument('--datadir', default="/home/shyam/ViT-Adapter/segmentation/data/cityscapes/")
-
-    parser.add_argument('--num-workers', type=int, default=4)
-    parser.add_argument('--batch-size', type=int, default=1)
-
-    parser.add_argument('--cpu', action='store_true')
-
-    args = parser.parse_args()
-
-    anomaly_score_MSP_list = []
-    anomaly_score_MaxLogit_list = []
-    anomaly_score_Entropy_list = []
-    anomaly_score_Rba_list = []
-
-    ood_gts_list = []
-
-    if not os.path.exists('results.txt'):
-        open('results.txt', 'w').close()
-
-    file = open('results.txt', 'a')
-
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
-    )
-
-    print(f"Using device: {device}")
-
-    
-    model = load_eomt(args, device)
-
-    
-    #inference loop
-    for path in glob.glob(os.path.expanduser(str(args.input[0]))):
+    for path in image_paths:
         print(path)
-        images = input_transform((Image.open(path).convert('RGB'))).unsqueeze(0).float().cuda()
-        #images = images.permute(0,3,1,2)
+        image = Image.open(path).convert("RGB")
+        image = input_transform(image)
+        image = image.unsqueeze(0).float().to(device)
+
         with torch.no_grad():
-            result = model(images)
+            image = image.squeeze(0)
+            image = (image * 255).to(torch.uint8)
+            image = [image.to(device)]
+            img_sizes = [img.shape[-2:] for img in image]
 
-        mask_logits = result[0][-1] #last layer mask logits
-        class_logits = result[1][-1] #last layer class logits 
+            with autocast(dtype=torch.float16, device_type="cuda"):
+                crops, origins = model.window_imgs_semantic(image)
+                mask_logits_per_layer, class_logits_per_layer = model(crops)
+                mask_logits = F.interpolate(mask_logits_per_layer[-1],(IMG_SIZE, IMG_SIZE),mode="bilinear")
+                crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
+                logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
 
-        H=512
-        W=1024
-        target_size = (H, W) #TO DO: chek size with config model
-
-        # masks upsampling
-        mask_logits = F.interpolate(
-            mask_logits,
-            size=target_size,
-            mode="bilinear",
-            align_corners=False
-        )
-
-         # mask probabilities
-        mask_probs = torch.sigmoid(mask_logits)
-
-        # class probabilities
-        class_probs = torch.softmax(class_logits, dim=-1) #-1 is the class dimension class_logits.shape=[B,Q,C+1]
-
-
-        #pixel-wise segmentation
-        Mat_Class=class_probs.transpose(1,2)
-        Mat_Mask=torch.flatten(input=mask_probs, start_dim=2)
-
-        pixel_logits=torch.matmul(Mat_Class, Mat_Mask)
-        pixel_logits = pixel_logits.unflatten(2, (H, W)) #return to H x W map from H*W vector
-        pixel_logits = pixel_logits.squeeze(0) #loose Batch size dimension
-       #print("pixel_logits shape:", pixel_logits.shape)
-        pixel_logits=pixel_logits[:-1, :, :]
-        #print("pixel_logits shape after pixel_logits=pixel_logits[:-1, :, :]:", pixel_logits.shape)
-
-        
-        # pixel probabilities
-        pixel_probs = torch.softmax(pixel_logits, dim=0)
-
-        pixel_probs_np = pixel_probs.cpu().numpy()
-
-        pixel_logits_np = pixel_logits.cpu().numpy()
-
-        #evaluation scores
-
-        anomaly_result_MSP = (
-            1.0 - np.max(pixel_probs_np, axis=0)
-        )
-
-        anomaly_result_MaxLogit = (
-            -np.max(pixel_logits_np, axis=0)
-        )
-
-        anomaly_result_Entropy = (
-            -np.sum(
-                pixel_probs_np *
-                np.log(pixel_probs_np + 1e-9),
-                axis=0
-            )
-        )
-
-        anomaly_result_Rba = (
-            -torch.sum(
-                torch.tanh(pixel_logits.cpu()),
-                dim=0
-            ).numpy()
-        )
-
-
-        #Ground Truth
-        pathGT = path.replace("images", "labels_masks")
+        pathGT = path.replace("images","labels_masks")
 
         if "RoadObsticle21" in pathGT:
-            pathGT = pathGT.replace("webp", "png")
+            pathGT = pathGT.replace("webp","png")
         if "fs_static" in pathGT:
-            pathGT = pathGT.replace("jpg", "png")
+            pathGT = pathGT.replace("jpg","png")
         if "RoadAnomaly" in pathGT:
-            pathGT = pathGT.replace("jpg", "png")
+            pathGT = pathGT.replace("jpg","png")
 
         mask = Image.open(pathGT)
-        mask = target_transform(mask)
         ood_gts = np.array(mask)
 
-        # dataset specific processing
-
         if "RoadAnomaly" in pathGT:
-            ood_gts = np.where((ood_gts == 2), 1, ood_gts)
+            ood_gts = np.where((ood_gts == 2),1,ood_gts)
         if "LostAndFound" in pathGT:
-            ood_gts = np.where((ood_gts == 0), 255, ood_gts)
-            ood_gts = np.where((ood_gts == 1), 0, ood_gts)
-            ood_gts = np.where(
-                (ood_gts > 1) & (ood_gts < 201),
-                1,
-                ood_gts
-            )
+            ood_gts = np.where((ood_gts == 0),255,ood_gts)
+            ood_gts = np.where((ood_gts == 1),0,ood_gts)
+            ood_gts = np.where((ood_gts > 1) & (ood_gts < 201),1,ood_gts)
         if "Streethazard" in pathGT:
-            ood_gts = np.where((ood_gts == 14), 255, ood_gts)
-            ood_gts = np.where((ood_gts < 20), 0, ood_gts)
-            ood_gts = np.where((ood_gts == 255), 1, ood_gts)
+            ood_gts = np.where((ood_gts == 14),255,ood_gts)
+            ood_gts = np.where((ood_gts < 20),0,ood_gts)
+            ood_gts = np.where((ood_gts == 255),1,ood_gts)
 
-        if 1 not in np.unique(ood_gts):    # skip images without anomalies
+        if 1 not in np.unique(ood_gts):
             continue
-
-        # store
-        else:
-             ood_gts_list.append(ood_gts)
-             anomaly_score_MSP_list.append(anomaly_result_MSP)
-             anomaly_score_MaxLogit_list.append(anomaly_result_MaxLogit)
-             anomaly_score_Entropy_list.append(anomaly_result_Entropy)
-             anomaly_score_Rba_list.append(anomaly_result_Rba)
-        del result, anomaly_result_MSP, anomaly_result_MaxLogit, anomaly_result_Entropy ,ood_gts, mask #, anomaly_result_Rba
-        torch.cuda.empty_cache()
-
-    file.write("\n")
-
-  # metrics evaluation
-
-    def eval_metrics(ood_gts_list, anomaly_score_list):
-
-        ood_gts = np.array(ood_gts_list)
-        anomaly_scores = np.array(anomaly_score_list)
 
         ood_mask = (ood_gts == 1)
         ind_mask = (ood_gts == 0)
 
-        ood_out = anomaly_scores[ood_mask]
-        ind_out = anomaly_scores[ind_mask]
+        logits_map = logits[0].float()
+
+        # MSP
+        msp_map = 1.0 - torch.softmax(logits_map, dim=0).max(dim=0)[0]
+        msp_result = msp_map.cpu().numpy()
+
+        results_per_method["MSP"]["ood"].append(msp_result[ood_mask])
+        results_per_method["MSP"]["ind"].append(msp_result[ind_mask])
+
+        # MaxLogit
+        maxlogit_map = -torch.max(logits_map, dim=0)[0]
+        maxlogit_result = maxlogit_map.cpu().numpy()
+
+        results_per_method["MaxLogit"]["ood"].append(maxlogit_result[ood_mask])
+        results_per_method["MaxLogit"]["ind"].append(maxlogit_result[ind_mask])
+
+        # MaxEntropy
+        softmax_probs = torch.softmax(logits_map, dim=0)
+        entropy_map = -torch.sum(softmax_probs * torch.log(softmax_probs + 1e-12),dim=0)
+
+        entropy_result = entropy_map.cpu().numpy()
+
+        results_per_method["MaxEntropy"]["ood"].append(entropy_result[ood_mask])
+        results_per_method["MaxEntropy"]["ind"].append(entropy_result[ind_mask])
+
+        # RbA
+
+        rba_map = -torch.tanh(logits_map).sum(dim=0)
+        rba_result = rba_map.cpu().numpy()
+
+        results_per_method["RbA"]["ood"].append(rba_result[ood_mask])
+        results_per_method["RbA"]["ind"].append(rba_result[ind_mask])
+
+        del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer, anomaly_result, scaled_logits
+        del ood_gts, mask, crops, origins, image
+        torch.cuda.empty_cache()
+
+    for method in results_per_method:
+
+        ood_out = np.concatenate(results_per_method[method]["ood"])
+        ind_out = np.concatenate(results_per_method[method]["ind"])
 
         ood_label = np.ones(len(ood_out))
         ind_label = np.zeros(len(ind_out))
@@ -388,57 +174,25 @@ def main():
         prc_auc = average_precision_score(val_label, val_out)
         fpr = fpr_at_95_tpr(val_out, val_label)
 
-        return [prc_auc, fpr]
+        print(f"\nMethod: {method}")
+        print(f"AUPRC score: {prc_auc * 100.0}")
+        print(f"FPR@TPR95: {fpr * 100.0}\n")
 
-    #evaluation metrics for all scores
+if __name__ == "__main__":
 
-    [prc_auc_MSP, fpr_MSP] = eval_metrics(ood_gts_list, anomaly_score_MSP_list)
-    [prc_auc_MaxLogit, fpr_MaxLogit] = eval_metrics(ood_gts_list, anomaly_score_MaxLogit_list)
-    [prc_auc_Entropy, fpr_Entropy] = eval_metrics(ood_gts_list, anomaly_score_Entropy_list)
-    [prc_auc_Rba, fpr_Rba] = eval_metrics(ood_gts_list, anomaly_score_Rba_list)
+    parser = ArgumentParser()
 
-    print(f'AUPRC MSP score: {prc_auc_MSP*100.0}')
-    print(f'FPR@TPR95 MSP: {fpr_MSP*100.0}')
+    parser.add_argument(
+        "--input",
+        default="/home/shyam/Mask2Former/unk-eval/RoadObsticle21/images/*.webp",
+        nargs="+",
+        help="A list of space separated input images; "
+        "or a single glob pattern such as 'directory/*.jpg'",
+    )  
 
-    print(f'AUPRC MaxLogit score: {prc_auc_MaxLogit*100.0}')
-    print(f'FPR@TPR95 MaxLogit: {fpr_MaxLogit*100.0}')
+    parser.add_argument("--checkpoint",type=str,default="/content/drive/MyDrive/ML_Project/eomt_cityscapes.bin")
 
-    print(f'AUPRC Entropy score: {prc_auc_Entropy*100.0}')
-    print(f'FPR@TPR95 Entropy: {fpr_Entropy*100.0}')
+    parser.add_argument("--cpu",action="store_true")
 
-    print(f'AUPRC Rba score: {prc_auc_Rba*100.0}')
-    print(f'FPR@TPR95 Rba: {fpr_Rba*100.0}')
-
-
-  
-    file.write(
-        (
-            'AUPRC softmax score: '
-            + str(prc_auc_MSP * 100.0)
-            + '   FPR@TPR95 softmax: '
-            + str(fpr_MSP * 100.0)
-
-            + '\nAUPRC logit score: '
-            + str(prc_auc_MaxLogit * 100.0)
-            + '   FPR@TPR95 logit: '
-            + str(fpr_MaxLogit * 100.0)
-
-            + '\nAUPRC entropy score: '
-            + str(prc_auc_Entropy * 100.0)
-            + '   FPR@TPR95 entropy: '
-            + str(fpr_Entropy * 100.0)
-
-            + '\nAUPRC rba score: '
-            + str(prc_auc_Rba * 100.0)
-            + '   FPR@TPR95 rba: '
-            + str(fpr_Rba * 100.0)
-
-            + '\n'
-        )
-    )
-
-    file.close()
-
-
-if __name__ == '__main__':
-    main()
+    args = parser.parse_args()
+    main(args)
