@@ -156,7 +156,8 @@ def main(args):
         results_per_method["RbA"]["ood"].append(rba_result[ood_mask])
         results_per_method["RbA"]["ind"].append(rba_result[ind_mask])
 
-        del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer, anomaly_result, scaled_logits
+        del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer
+        del logits_map, msp_map, msp_result, maxlogit_map, maxlogit_result, softmax_probs, entropy_map, entropy_result, rba_map, rba_result
         del ood_gts, mask, crops, origins, image
         torch.cuda.empty_cache()
 
