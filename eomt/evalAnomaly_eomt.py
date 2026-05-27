@@ -68,127 +68,149 @@ def main(args):
 
     print('Model weights loaded succesfully')
 
-    results_per_method = {
-        "MSP": {"scores": [], "labels": []},
-        "MaxLogit": {"scores": [], "labels": []},
-        "MaxEntropy": {"scores": [], "labels": []},
-        "RbA": {"scores": [], "labels": []},
-    }
+    methods = ["MSP", "MaxLogit", "MaxEntropy", "RbA"]
 
     image_paths = glob.glob(os.path.expanduser(str(args.input[0])))
 
-    for path in image_paths:
-        print(path)
-        image = Image.open(path).convert("RGB")
-        image = input_transform(image)
-        image = image.unsqueeze(0).float().to(device)
+    for method in methods:
 
-        with torch.no_grad():
-            image = image.squeeze(0)
-            image = (image * 255).to(torch.uint8)
-            image = [image.to(device)]
-            img_sizes = [img.shape[-2:] for img in image]
+        print(f"\nRunning method: {method}\n")
 
-            with autocast(dtype=torch.float16, device_type="cuda"):
-                crops, origins = model.window_imgs_semantic(image)
-                mask_logits_per_layer, class_logits_per_layer = model(crops)
-                mask_logits = F.interpolate(mask_logits_per_layer[-1],(IMG_SIZE, IMG_SIZE),mode="bilinear")
-                crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
-                logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
+        scores_list = []
+        labels_list = []
 
-        del crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer, crops, origins, img_sizes
+        for path in image_paths:
 
-        pathGT = path.replace("images","labels_masks")
+            if method == "MSP":
+                print(path)
 
-        if "RoadObsticle21" in pathGT:
-            pathGT = pathGT.replace("webp","png")
-        if "fs_static" in pathGT:
-            pathGT = pathGT.replace("jpg","png")
-        if "RoadAnomaly" in pathGT:
-            pathGT = pathGT.replace("jpg","png")
+            image = Image.open(path).convert("RGB")
+            image = input_transform(image)
+            image = image.unsqueeze(0).float().to(device)
 
-        mask = Image.open(pathGT)
-        ood_gts = np.array(mask)
+            with torch.no_grad():
 
-        if "RoadAnomaly" in pathGT:
-            ood_gts = np.where((ood_gts == 2),1,ood_gts)
-        if "LostAndFound" in pathGT:
-            ood_gts = np.where((ood_gts == 0),255,ood_gts)
-            ood_gts = np.where((ood_gts == 1),0,ood_gts)
-            ood_gts = np.where((ood_gts > 1) & (ood_gts < 201),1,ood_gts)
-        if "Streethazard" in pathGT:
-            ood_gts = np.where((ood_gts == 14),255,ood_gts)
-            ood_gts = np.where((ood_gts < 20),0,ood_gts)
-            ood_gts = np.where((ood_gts == 255),1,ood_gts)
+                image = image.squeeze(0)
+                image = (image * 255).to(torch.uint8)
+                image = [image.to(device)]
 
-        if 1 not in np.unique(ood_gts):
-            continue
+                img_sizes = [img.shape[-2:] for img in image]
 
-        ood_mask = (ood_gts == 1)
-        ind_mask = (ood_gts == 0)
+                with autocast(dtype=torch.float16, device_type="cuda"):
 
-        logits_map = logits[0].float()
-        logits_map = logits[0].half()
+                    crops, origins = model.window_imgs_semantic(image)
 
-        del logits, ood_gts, mask, image
+                    mask_logits_per_layer, class_logits_per_layer = model(crops)
 
-        # MSP
-        msp_map = 1.0 - torch.softmax(logits_map, dim=0).max(dim=0)[0]
-        msp_result = msp_map.cpu().numpy()
+                    mask_logits = F.interpolate(
+                        mask_logits_per_layer[-1],
+                        (IMG_SIZE, IMG_SIZE),
+                        mode="bilinear"
+                    )
 
-        msp_scores = np.concatenate((msp_result[ind_mask], msp_result[ood_mask]))
-        msp_labels = np.concatenate((np.zeros(np.sum(ind_mask)),np.ones(np.sum(ood_mask))))
+                    crop_logits = model.to_per_pixel_logits_semantic(
+                        mask_logits,
+                        class_logits_per_layer[-1]
+                    )
 
-        results_per_method["MSP"]["scores"].append(msp_scores)
-        results_per_method["MSP"]["labels"].append(msp_labels)
+                    logits = model.revert_window_logits_semantic(
+                        crop_logits,
+                        origins,
+                        img_sizes
+                    )
 
-        del msp_map, msp_result, msp_scores, msp_labels
+            pathGT = path.replace("images", "labels_masks")
 
-        # MaxLogit
-        maxlogit_map = -torch.max(logits_map, dim=0)[0]
-        maxlogit_result = maxlogit_map.cpu().numpy()
+            if "RoadObsticle21" in pathGT:
+                pathGT = pathGT.replace("webp", "png")
 
-        maxlogit_scores = np.concatenate((maxlogit_result[ind_mask], maxlogit_result[ood_mask]))
-        maxlogit_labels = np.concatenate((np.zeros(np.sum(ind_mask)),np.ones(np.sum(ood_mask))))
+            if "fs_static" in pathGT:
+                pathGT = pathGT.replace("jpg", "png")
 
-        results_per_method["MaxLogit"]["scores"].append(maxlogit_scores)
-        results_per_method["MaxLogit"]["labels"].append(maxlogit_labels)
+            if "RoadAnomaly" in pathGT:
+                pathGT = pathGT.replace("jpg", "png")
 
-        del maxlogit_map, maxlogit_result, maxlogit_scores, maxlogit_labels
+            mask = Image.open(pathGT)
+            ood_gts = np.array(mask)
 
-        # MaxEntropy
-        softmax_probs = torch.softmax(logits_map, dim=0)
-        entropy_map = -torch.sum(softmax_probs * torch.log(softmax_probs + 1e-12),dim=0)
-        entropy_result = entropy_map.cpu().numpy()
+            if "RoadAnomaly" in pathGT:
+                ood_gts = np.where((ood_gts == 2), 1, ood_gts)
 
-        entropy_scores = np.concatenate((entropy_result[ind_mask], entropy_result[ood_mask]))
-        entropy_labels = np.concatenate((np.zeros(np.sum(ind_mask)),np.ones(np.sum(ood_mask))))
+            if "LostAndFound" in pathGT:
+                ood_gts = np.where((ood_gts == 0), 255, ood_gts)
+                ood_gts = np.where((ood_gts == 1), 0, ood_gts)
+                ood_gts = np.where((ood_gts > 1) & (ood_gts < 201), 1, ood_gts)
 
-        results_per_method["MaxEntropy"]["scores"].append(entropy_scores)
-        results_per_method["MaxEntropy"]["labels"].append(entropy_labels)
+            if "Streethazard" in pathGT:
+                ood_gts = np.where((ood_gts == 14), 255, ood_gts)
+                ood_gts = np.where((ood_gts < 20), 0, ood_gts)
+                ood_gts = np.where((ood_gts == 255), 1, ood_gts)
 
-        del softmax_probs, entropy_map, entropy_result, entropy_scores, entropy_labels
+            if 1 not in np.unique(ood_gts):
+                continue
 
-        # RbA
-        rba_map = -torch.tanh(logits_map).sum(dim=0)
-        rba_result = rba_map.cpu().numpy()
+            ood_mask = (ood_gts == 1)
+            ind_mask = (ood_gts == 0)
 
-        rba_scores = np.concatenate((rba_result[ind_mask], rba_result[ood_mask]))
-        rba_labels = np.concatenate((np.zeros(np.sum(ind_mask)),np.ones(np.sum(ood_mask))))
+            logits_map = logits[0].float()
 
-        results_per_method["RbA"]["scores"].append(rba_scores)
-        results_per_method["RbA"]["labels"].append(rba_labels)
-        
-        del logits_map
-        del rba_map, rba_result, rba_scores, rba_labels
-        del ood_mask, ind_mask
-        torch.cuda.empty_cache()
-        gc.collect()
+            if method == "MSP":
 
-    for method in results_per_method:
+                score_map = 1.0 - torch.softmax(
+                    logits_map,
+                    dim=0
+                ).max(dim=0)[0]
 
-        val_out = np.concatenate(results_per_method[method]["scores"])
-        val_label = np.concatenate(results_per_method[method]["labels"])
+            elif method == "MaxLogit":
+
+                score_map = -torch.max(
+                    logits_map,
+                    dim=0
+                )[0]
+
+            elif method == "MaxEntropy":
+
+                softmax_probs = torch.softmax(
+                    logits_map,
+                    dim=0
+                )
+
+                score_map = -torch.sum(
+                    softmax_probs * torch.log(softmax_probs + 1e-12),
+                    dim=0
+                )
+
+                del softmax_probs
+
+            elif method == "RbA":
+
+                score_map = -torch.tanh(
+                    logits_map
+                ).sum(dim=0)
+
+            score_result = score_map.cpu().numpy()
+
+            scores = np.concatenate((
+                score_result[ind_mask],
+                score_result[ood_mask]
+            ))
+
+            labels = np.concatenate((
+                np.zeros(np.sum(ind_mask)),
+                np.ones(np.sum(ood_mask))
+            ))
+
+            scores_list.append(scores)
+            labels_list.append(labels)
+
+            del logits, logits_map, score_map, score_result, scores, labels
+            del crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer
+            del crops, origins, img_sizes, image, mask, ood_gts, ood_mask, ind_mask
+            torch.cuda.empty_cache()
+            gc.collect()
+
+        val_out = np.concatenate(scores_list)
+        val_label = np.concatenate(labels_list)
 
         prc_auc = average_precision_score(val_label, val_out)
         fpr = fpr_at_95_tpr(val_out, val_label)
@@ -197,7 +219,9 @@ def main(args):
         print(f"AUPRC score: {prc_auc * 100.0}")
         print(f"FPR@TPR95: {fpr * 100.0}\n")
 
-        del val_out, val_label
+        del val_out, val_label, scores_list, labels_list
+        torch.cuda.empty_cache()
+        gc.collect()
 
 if __name__ == "__main__":
 
