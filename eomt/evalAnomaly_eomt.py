@@ -159,6 +159,7 @@ def main(args):
         del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer
         del logits_map, msp_map, msp_result, maxlogit_map, maxlogit_result, softmax_probs, entropy_map, entropy_result, rba_map, rba_result
         del ood_gts, mask, crops, origins, image
+        del img_sizes, ood_mask, ind_mask
         torch.cuda.empty_cache()
 
     for method in results_per_method:
@@ -178,6 +179,8 @@ def main(args):
         print(f"\nMethod: {method}")
         print(f"AUPRC score: {prc_auc * 100.0}")
         print(f"FPR@TPR95: {fpr * 100.0}\n")
+
+        del ood_out, ind_out, ood_label, ind_label, val_out, val_label
 
 if __name__ == "__main__":
 
