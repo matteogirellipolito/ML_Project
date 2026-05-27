@@ -7,6 +7,8 @@ import importlib
 import numpy as np
 import torch.nn.functional as F
 
+import gc
+
 from PIL import Image
 from argparse import ArgumentParser
 
@@ -161,6 +163,7 @@ def main(args):
         del ood_gts, mask, crops, origins, image
         del img_sizes, ood_mask, ind_mask
         torch.cuda.empty_cache()
+        gc.collect()
 
     for method in results_per_method:
 
