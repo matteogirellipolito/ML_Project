@@ -73,7 +73,6 @@ def main(args):
     image_paths = glob.glob(os.path.expanduser(str(args.input[0])))
 
     for method in methods:
-
         scores_list = []
         labels_list = []
 
@@ -87,44 +86,23 @@ def main(args):
             image = image.unsqueeze(0).float().to(device)
 
             with torch.no_grad():
-
                 image = image.squeeze(0)
                 image = (image * 255).to(torch.uint8)
                 image = [image.to(device)]
-
                 img_sizes = [img.shape[-2:] for img in image]
 
                 with autocast(dtype=torch.float16, device_type="cuda"):
-
                     crops, origins = model.window_imgs_semantic(image)
-
                     mask_logits_per_layer, class_logits_per_layer = model(crops)
-
-                    mask_logits = F.interpolate(
-                        mask_logits_per_layer[-1],
-                        (IMG_SIZE, IMG_SIZE),
-                        mode="bilinear"
-                    )
-
-                    crop_logits = model.to_per_pixel_logits_semantic(
-                        mask_logits,
-                        class_logits_per_layer[-1]
-                    )
-
-                    logits = model.revert_window_logits_semantic(
-                        crop_logits,
-                        origins,
-                        img_sizes
-                    )
+                    mask_logits = F.interpolate(mask_logits_per_layer[-1],(IMG_SIZE, IMG_SIZE),mode="bilinear")
+                    crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
+                    logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
 
             pathGT = path.replace("images", "labels_masks")
-
             if "RoadObsticle21" in pathGT:
                 pathGT = pathGT.replace("webp", "png")
-
             if "fs_static" in pathGT:
                 pathGT = pathGT.replace("jpg", "png")
-
             if "RoadAnomaly" in pathGT:
                 pathGT = pathGT.replace("jpg", "png")
 
@@ -133,12 +111,10 @@ def main(args):
 
             if "RoadAnomaly" in pathGT:
                 ood_gts = np.where((ood_gts == 2), 1, ood_gts)
-
             if "LostAndFound" in pathGT:
                 ood_gts = np.where((ood_gts == 0), 255, ood_gts)
                 ood_gts = np.where((ood_gts == 1), 0, ood_gts)
                 ood_gts = np.where((ood_gts > 1) & (ood_gts < 201), 1, ood_gts)
-
             if "Streethazard" in pathGT:
                 ood_gts = np.where((ood_gts == 14), 255, ood_gts)
                 ood_gts = np.where((ood_gts < 20), 0, ood_gts)
@@ -153,51 +129,22 @@ def main(args):
             logits_map = logits[0].float()
 
             if method == "MSP":
-
-                score_map = 1.0 - torch.softmax(
-                    logits_map,
-                    dim=0
-                ).max(dim=0)[0]
+                score_map = 1.0 - torch.softmax(logits_map,dim=0).max(dim=0)[0]
 
             elif method == "MaxLogit":
-
-                score_map = -torch.max(
-                    logits_map,
-                    dim=0
-                )[0]
+                score_map = -torch.max(logits_map,dim=0)[0]
 
             elif method == "MaxEntropy":
-
-                softmax_probs = torch.softmax(
-                    logits_map,
-                    dim=0
-                )
-
-                score_map = -torch.sum(
-                    softmax_probs * torch.log(softmax_probs + 1e-12),
-                    dim=0
-                )
-
+                softmax_probs = torch.softmax(logits_map,dim=0)
+                score_map = -torch.sum(softmax_probs * torch.log(softmax_probs + 1e-12),dim=0)
                 del softmax_probs
 
             elif method == "RbA":
-
-                score_map = -torch.tanh(
-                    logits_map
-                ).sum(dim=0)
+                score_map = -torch.tanh(logits_map).sum(dim=0)
 
             score_result = score_map.cpu().numpy()
-
-            scores = np.concatenate((
-                score_result[ind_mask],
-                score_result[ood_mask]
-            ))
-
-            labels = np.concatenate((
-                np.zeros(np.sum(ind_mask)),
-                np.ones(np.sum(ood_mask))
-            ))
-
+            scores = np.concatenate((score_result[ind_mask],score_result[ood_mask]))
+            labels = np.concatenate((np.zeros(np.sum(ind_mask)),np.ones(np.sum(ood_mask))))
             scores_list.append(scores)
             labels_list.append(labels)
 
@@ -209,7 +156,6 @@ def main(args):
 
         val_out = np.concatenate(scores_list)
         val_label = np.concatenate(labels_list)
-
         prc_auc = average_precision_score(val_label, val_out)
         fpr = fpr_at_95_tpr(val_out, val_label)
 
