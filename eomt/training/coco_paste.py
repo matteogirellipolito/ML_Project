@@ -158,11 +158,44 @@ def contaminate_cityscapes_image(
     coco_name = ann["file_name"].replace(".png",".jpg")
     coco_img = np.array(Image.open(coco_img_dir + "/" + coco_name).convert("RGB"))
 
-    y1,y2 = ys.min(), ys.max()
-    x1,x2 = xs.min(), xs.max()
+    # bounding box object
+    y1, y2 = ys.min(), ys.max()
+    x1, x2 = xs.min(), xs.max()
 
-    crop_img = coco_img[y1:y2,x1:x2]
-    crop_mask = inst_mask[y1:y2,x1:x2]
+    obj_h = y2 - y1
+    obj_w = x2 - x1
+
+    # proportional padding
+    pad_y = int(obj_h * 0.15)
+    pad_x = int(obj_w * 0.15)
+
+    # expanded box clipped to image boundaries
+    y1 = max(0, y1 - pad_y)
+    y2 = min(coco_img.shape[0], y2 + pad_y)
+
+    x1 = max(0, x1 - pad_x)
+    x2 = min(coco_img.shape[1], x2 + pad_x)
+
+    crop_img = coco_img[
+        y1:y2,
+        x1:x2
+    ]
+
+    crop_mask = inst_mask[
+        y1:y2,
+        x1:x2
+    ]
+
+    coverage = crop_mask.sum() / crop_mask.size
+
+    if coverage < 0.12:
+        return contaminate_cityscapes_image(
+            city_path,
+            pano,
+            coco_img_dir,
+            panoptic_mask_dir
+        )
+
     obj_img,obj_mask = adaptive_resize(
         crop_img,
         crop_mask,
