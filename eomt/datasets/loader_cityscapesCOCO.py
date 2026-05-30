@@ -14,10 +14,10 @@ class CityscapesOE(Dataset):
         self.images = sorted(list(Path(image_dir).glob("*.png")))
         self.masks = sorted(list(Path(anomaly_dir).glob("*.png")))
 
-    def _len(self):
+    def __len__(self):
         return len(self.images)
 
-    def _getitem(self,idx):
+    def __getitem__(self,idx):
         img = np.array(Image.open(self.images[idx]).convert("RGB"))
         anomaly = np.array(Image.open(self.masks[idx]))
         anomaly = anomaly > 0
