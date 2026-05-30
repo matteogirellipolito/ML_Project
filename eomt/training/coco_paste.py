@@ -107,8 +107,11 @@ def adaptive_resize(
 
     new_h = max(60, int(h*scale))
     new_w = max(60, int(w*scale))
-    new_h = min(new_h,420)
-    new_w = min(new_w,420)
+    max_pixels = int(city_h * 0.45)
+    if max(new_h, new_w) > max_pixels:
+        scale_down = max_pixels / max(new_h, new_w)
+        new_h = int(new_h * scale_down)
+        new_w = int(new_w * scale_down)
 
     obj_img = np.array(Image.fromarray(obj_img).resize((new_w,new_h),Image.BILINEAR))
     obj_mask = np.array(Image.fromarray(obj_mask.astype(np.uint8)*255).resize((new_w,new_h),Image.NEAREST)) > 0
@@ -158,18 +161,15 @@ def contaminate_cityscapes_image(
     coco_name = ann["file_name"].replace(".png",".jpg")
     coco_img = np.array(Image.open(coco_img_dir + "/" + coco_name).convert("RGB"))
 
-    # bounding box object
     y1, y2 = ys.min(), ys.max()
     x1, x2 = xs.min(), xs.max()
 
     obj_h = y2 - y1
     obj_w = x2 - x1
 
-    # proportional padding
-    pad_y = int(obj_h * 0.15)
-    pad_x = int(obj_w * 0.15)
+    pad_y = int(obj_h * 0.20)
+    pad_x = int(obj_w * 0.20)
 
-    # expanded box clipped to image boundaries
     y1 = max(0, y1 - pad_y)
     y2 = min(coco_img.shape[0], y2 + pad_y)
 
