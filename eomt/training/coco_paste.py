@@ -41,7 +41,7 @@ def adaptive_resize(
     obj_img,
     obj_mask,
     city_img,
-    min_frac=0.25,
+    min_frac=0.30,
     max_frac=0.50,
 ):
     city_h = city_img.shape[0]
@@ -51,8 +51,8 @@ def adaptive_resize(
 
     new_h = max(60, int(h*scale))
     new_w = max(60, int(w*scale))
-    new_h = min(new_h,640)
-    new_w = min(new_w,640)
+    new_h = min(new_h,800)
+    new_w = min(new_w,800)
 
     obj_img = np.array(Image.fromarray(obj_img).resize((new_w,new_h),Image.BILINEAR))
     obj_mask = np.array(Image.fromarray(obj_mask.astype(np.uint8)*255).resize((new_w,new_h),Image.NEAREST)) > 0
