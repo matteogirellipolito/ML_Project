@@ -159,14 +159,19 @@ def contaminate_cityscapes_image(
     coco_name = ann["file_name"].replace(".png",".jpg")
     coco_img = np.array(Image.open(coco_img_dir + "/" + coco_name).convert("RGB"))
 
-    y1, y2 = ys.min(), ys.max()
-    x1, x2 = xs.min(), xs.max()
+    bx, by, bw, bh = seg["bbox"]
+    mask_y1, mask_y2 = ys.min(), ys.max()
+    mask_x1, mask_x2 = xs.min(), xs.max()
+    x1 = int(min(mask_x1, bx))
+    y1 = int(min(mask_y1, by))
+    x2 = int(max(mask_x2, bx + bw))
+    y2 = int(max(mask_y2, by + bh))
 
     obj_h = y2 - y1
     obj_w = x2 - x1
 
-    pad_y = int(obj_h * 0.30)
-    pad_x = int(obj_w * 0.30)
+    pad_y = int(obj_h * 0.40)
+    pad_x = int(obj_w * 0.40)
 
     y1 = max(0, y1 - pad_y)
     y2 = min(coco_img.shape[0], y2 + pad_y)
@@ -176,16 +181,6 @@ def contaminate_cityscapes_image(
 
     crop_img = coco_img[y1:y2,x1:x2]
     crop_mask = inst_mask[y1:y2,x1:x2]
-
-    # Debug visivo
-    masked_crop = crop_img.copy()
-    masked_crop[~crop_mask] = 0
-
-    plt.figure(figsize=(6,6))
-    plt.imshow(masked_crop)
-    plt.title("masked crop")
-    plt.axis("off")
-    plt.show()
 
     obj_img,obj_mask = adaptive_resize(
         crop_img,
