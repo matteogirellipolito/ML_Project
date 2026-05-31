@@ -170,8 +170,8 @@ def contaminate_cityscapes_image(
     obj_h = y2 - y1
     obj_w = x2 - x1
 
-    pad_y = int(obj_h * 0.40)
-    pad_x = int(obj_w * 0.40)
+    pad_y = int(obj_h * 0.50)
+    pad_x = int(obj_w * 0.50)
 
     y1 = max(0, y1 - pad_y)
     y2 = min(coco_img.shape[0], y2 + pad_y)
@@ -202,7 +202,7 @@ def contaminate_cityscapes_image(
     soft_mask = gaussian_filter(obj_mask.astype(float),sigma=1.2)
     soft_mask = np.clip(soft_mask,0,1)
     soft_mask = np.expand_dims(soft_mask,axis=-1)
-    
+
     blended = region.copy()
     blended[obj_mask] = (region[obj_mask] * (1-soft_mask[obj_mask]) + obj_img[obj_mask] * soft_mask[obj_mask]).astype(np.uint8)
 
