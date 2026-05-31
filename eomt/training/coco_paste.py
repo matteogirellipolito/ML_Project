@@ -41,8 +41,8 @@ def adaptive_resize(
     obj_img,
     obj_mask,
     city_img,
-    min_frac=0.18,
-    max_frac=0.35,
+    min_frac=0.25,
+    max_frac=0.50,
 ):
     city_h = city_img.shape[0]
     target_size = np.random.uniform(min_frac,max_frac) * city_h
