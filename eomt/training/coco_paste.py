@@ -198,10 +198,13 @@ def contaminate_cityscapes_image(
 
     anomaly_mask = np.zeros((H,W),dtype=np.uint8)
     region = result[y:y+oh,x:x+ow]
-    soft_mask = gaussian_filter(obj_mask.astype(float),sigma=2)
-    soft_mask = np.expand_dims(soft_mask,axis=-1)
 
-    blended = (region*(1-soft_mask) + obj_img*soft_mask).astype(np.uint8)
+    soft_mask = gaussian_filter(obj_mask.astype(float),sigma=1.2)
+    soft_mask = np.clip(soft_mask,0,1)
+    soft_mask = np.expand_dims(soft_mask,axis=-1)
+    
+    blended = region.copy()
+    blended[obj_mask] = (region[obj_mask] * (1-soft_mask[obj_mask]) + obj_img[obj_mask] * soft_mask[obj_mask]).astype(np.uint8)
 
     result[y:y+oh,x:x+ow] = blended
 
