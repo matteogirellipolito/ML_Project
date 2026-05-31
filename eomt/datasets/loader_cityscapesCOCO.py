@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 
 import numpy as np
 
-class CityscapesOE(Dataset):
+class CityscapesCOCO(Dataset):
     def __init__(
         self,
         image_dir,

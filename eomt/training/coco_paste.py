@@ -1,6 +1,5 @@
 import random
 import numpy as np
-import matplotlib as plt
 
 from PIL import Image
 from scipy.ndimage import gaussian_filter
@@ -8,81 +7,25 @@ from scipy.ndimage import gaussian_filter
 VALID_CATEGORIES = {
 
     # animals    
-    16: "bird",
-    17: "cat",
-    18: "dog",
-    19: "horse",
-    20: "sheep",
-    21: "cow",
-    22: "elephant",
-    23: "bear",
-    24: "zebra",
-    25: "giraffe",
+    16: "bird", 17: "cat", 18: "dog", 19: "horse", 20: "sheep", 21: "cow", 22: "elephant", 23: "bear", 24: "zebra", 25: "giraffe",
 
     # accessories / sports 
-    27: "backpack",
-    28: "umbrella",
-    31: "handbag", 
-    32: "tie",
-    33: "suitcase",
-    34: "frisbee",
-    35: "skis",
-    36: "snowboard",
-    37: "sports ball",
-    38: "kite",
-    39: "baseball bat",
-    40: "baseball glove",
-    
+    27: "backpack", 28: "umbrella", 31: "handbag", 32: "tie", 33: "suitcase", 34: "frisbee", 35: "skis", 36: "snowboard", 37: "sports ball",
+    38: "kite", 39: "baseball bat", 40: "baseball glove",
+
     # household objects
-    41: "skateboard",
-    42: "surfboard",
-    43: "tennis racket",
-    44: "bottle",
-    46: "wine glass",
-    47: "cup",
-    48: "fork",
-    49: "knife",
-    50: "spoon",
-    51: "bowl",
-    52: "banana",
-    53: "apple",
-    54: "sandwich",
-    55: "orange",
-    56: "broccoli",
-    57: "carrot",
+    41: "skateboard", 42: "surfboard", 43: "tennis racket", 44: "bottle", 46: "wine glass", 47: "cup", 48: "fork", 49: "knife", 50: "spoon",
+    51: "bowl", 84: "book", 85: "clock", 86: "vase", 87: "scissors", 88: "teddy bear", 89: "hair drier", 90: "toothbrush",
+
+    #food
+    52: "banana", 53: "apple", 54: "sandwich", 55: "orange", 56: "broccoli", 57: "carrot", 58: "hot dog", 59: "pizza", 60: "donut", 61: "cake",
     
     # furniture
-    58: "hot dog",
-    59: "pizza",
-    60: "donut",
-    61: "cake",
-    62: "chair",
-    63: "couch",
-    64: "potted plant",
-    65: "bed",
-    70: "toilet",
+    62: "chair", 63: "couch", 64: "potted plant", 65: "bed", 70: "toilet", 78: "microwave", 79: "oven", 80: "toaster", 81: "sink", 
+    82: "refrigerator",
     
     # electronics
-    72: "tv",
-    73: "laptop",
-    74: "mouse",
-    75: "remote",
-    76: "keyboard",
-
-    # miscellaneous objects    
-    77: "cell phone",
-    78: "microwave",
-    79: "oven",
-    80: "toaster",
-    81: "sink",
-    82: "refrigerator",
-    84: "book",
-    85: "clock",
-    86: "vase",
-    87: "scissors",
-    88: "teddy bear",
-    89: "hair drier",
-    90: "toothbrush"
+    72: "tv", 73: "laptop", 74: "mouse", 75: "remote", 76: "keyboard", 77: "cell phone"
 }
 
 def rgb2id(color):
@@ -204,7 +147,8 @@ def contaminate_cityscapes_image(
     soft_mask = np.expand_dims(soft_mask,axis=-1)
 
     blended = region.copy()
-    blended[obj_mask] = (region[obj_mask] * (1-soft_mask[obj_mask]) + obj_img[obj_mask] * soft_mask[obj_mask]).astype(np.uint8)
+    alpha = soft_mask.squeeze(-1)
+    blended[obj_mask] = (region[obj_mask] * (1 - alpha[obj_mask,None]) + obj_img[obj_mask] * alpha[obj_mask,None]).astype(np.uint8)
 
     result[y:y+oh,x:x+ow] = blended
 
