@@ -17,13 +17,17 @@ class CityscapesCOCO(Dataset):
         semantic_dataset=None,
     ):
 
-        self.images = sorted(
-            list(Path(image_dir).rglob("*.png"))
-        )
+        image_dir = Path(image_dir)
+        anomaly_dir = Path(anomaly_dir)
 
-        self.masks = sorted(
-            list(Path(anomaly_dir).rglob("*.png"))
-        )
+        self.images = sorted([p for p in image_dir.rglob("*.png") if p.is_file()])
+        self.masks = sorted([p for p in anomaly_dir.rglob("*.png") if p.is_file()])
+
+        print("FOUND IMAGES:", len(self.images))
+        print("FOUND MASKS:", len(self.masks))
+
+        assert len(self.images) > 0
+        assert len(self.images) == len(self.masks)
 
         self.semantic_dataset = semantic_dataset
 
@@ -32,27 +36,11 @@ class CityscapesCOCO(Dataset):
 
     def __getitem__(self, idx):
 
-        img = np.array(
-            Image.open(
-                self.images[idx]
-            ).convert("RGB")
-        )
-
-        anomaly = np.array(
-            Image.open(
-                self.masks[idx]
-            )
-        ) > 0
-
-        anomaly = tv_tensors.Mask(
-            torch.tensor(
-                anomaly,
-                dtype=torch.bool
-            )
-        )
+        img = np.array(Image.open(self.images[idx]).convert("RGB"))
+        anomaly = np.array(Image.open(self.masks[idx])) > 0
+        anomaly = tv_tensors.Mask(torch.tensor(anomaly,dtype=torch.bool))
 
         if self.semantic_dataset is None:
-
             return img, anomaly
 
         _, target = self.semantic_dataset[idx]
