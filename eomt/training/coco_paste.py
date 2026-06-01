@@ -130,28 +130,52 @@ def contaminate_cityscapes_image(
         crop_mask,
         city_img
     )
+
     result = city_img.copy()
-    H,W = result.shape[:2]
-    oh,ow = obj_img.shape[:2]
-    max_x = max(W-ow-20, W//3 + 1)
-    max_y = max(H-oh-20, H//2 + 1)
-    
-    x = np.random.randint(W//3,max_x)
-    y = np.random.randint(H//2,max_y)
 
-    anomaly_mask = np.zeros((H,W),dtype=np.uint8)
+    H, W = result.shape[:2]
+    oh, ow = obj_img.shape[:2]
+
+    # Se oggetto è enorme, rigenera uno
+    if oh >= H or ow >= W:
+
+        return contaminate_cityscapes_image(
+            city_path,
+            pano,
+            coco_img_dir,
+            panoptic_mask_dir
+        )
+
+    # Placement valido
+    min_x = W // 3
+    max_x = W - ow - 1
+
+    min_y = H // 2
+    max_y = H - oh - 1
+
+    # Se non entra nella regione desiderata
+    # ricampiona un altro oggetto
+    if max_x <= min_x or max_y <= min_y:
+        return contaminate_cityscapes_image(
+            city_path,
+            pano,
+            coco_img_dir,
+            panoptic_mask_dir
+        )
+
+    x = np.random.randint(min_x,max_x)
+    y = np.random.randint(min_y,max_y)
+
     region = result[y:y+oh,x:x+ow]
-
     soft_mask = gaussian_filter(obj_mask.astype(float),sigma=1.2)
     soft_mask = np.clip(soft_mask,0,1)
-    soft_mask = np.expand_dims(soft_mask,axis=-1)
+    alpha = soft_mask[..., None]
+    blended = (region * (1 - alpha) + obj_img * alpha).astype(np.uint8)
 
-    blended = region.copy()
-    alpha = soft_mask.squeeze(-1)
-    blended[obj_mask] = (region[obj_mask] * (1 - alpha[obj_mask,None]) + obj_img[obj_mask] * alpha[obj_mask,None]).astype(np.uint8)
+    region[obj_mask] = blended[obj_mask]
+    result[y:y+oh,x:x+ow] = region
 
-    result[y:y+oh,x:x+ow] = blended
-
+    anomaly_mask = np.zeros((H,W),dtype=np.uint8)
     anomaly_mask[y:y+oh,x:x+ow][obj_mask] = 1
 
     return result, anomaly_mask
