@@ -1,11 +1,12 @@
 from pathlib import Path
 from PIL import Image
 
-from torch.utils.data import Dataset
-
 import numpy as np
-import glob
-import os
+import torch
+
+from torch.utils.data import Dataset
+from torchvision import tv_tensors
+
 
 class CityscapesCOCO(Dataset):
 
@@ -13,40 +14,49 @@ class CityscapesCOCO(Dataset):
         self,
         image_dir,
         anomaly_dir,
-        semantic_dir,
+        semantic_dataset=None,
     ):
 
-        self.images = sorted(list(Path(image_dir).glob("*.png")))
-        self.anomaly_masks = sorted(list(Path(anomaly_dir).glob("*.png")))
-        self.semantic_dir = semantic_dir
+        self.images = sorted(
+            list(Path(image_dir).glob("*.png"))
+        )
 
-        assert len(self.images) == len(self.anomaly_masks)
+        self.masks = sorted(
+            list(Path(anomaly_dir).glob("*.png"))
+        )
+
+        self.semantic_dataset = semantic_dataset
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
-        img_path = str(self.images[idx])
-        filename = os.path.basename(img_path)
-        city = filename.split("_")[0]
-        semantic_path = glob.glob(
-            self.semantic_dir
-            + f"/{city}/"
-            + filename.replace(
-                city + "_",
-                ""
-            ).replace(
-                "_leftImg8bit",
-                "_gtFine_labelIds"
-            )
-        )[0]
 
-        img = np.array(Image.open(img_path).convert("RGB"))
-        anomaly = np.array(Image.open(self.anomaly_masks[idx])) > 0
-        semantic = np.array(Image.open(semantic_path))
-
-        return (
-            img,
-            semantic,
-            anomaly
+        img = np.array(
+            Image.open(
+                self.images[idx]
+            ).convert("RGB")
         )
+
+        anomaly = np.array(
+            Image.open(
+                self.masks[idx]
+            )
+        ) > 0
+
+        anomaly = tv_tensors.Mask(
+            torch.tensor(
+                anomaly,
+                dtype=torch.bool
+            )
+        )
+
+        if self.semantic_dataset is None:
+
+            return img, anomaly
+
+        _, target = self.semantic_dataset[idx]
+
+        target["anomaly_mask"] = anomaly
+
+        return img, target
