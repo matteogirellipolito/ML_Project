@@ -18,11 +18,11 @@ class CityscapesCOCO(Dataset):
     ):
 
         self.images = sorted(
-            list(Path(image_dir).glob("*.png"))
+            list(Path(image_dir).rglob("*.png"))
         )
 
         self.masks = sorted(
-            list(Path(anomaly_dir).glob("*.png"))
+            list(Path(anomaly_dir).rglob("*.png"))
         )
 
         self.semantic_dataset = semantic_dataset
