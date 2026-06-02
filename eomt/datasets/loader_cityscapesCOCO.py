@@ -36,15 +36,19 @@ class CityscapesCOCO(Dataset):
 
     def __getitem__(self, idx):
 
-        img = np.array(Image.open(self.images[idx]).convert("RGB"))
         anomaly = np.array(Image.open(self.masks[idx])) > 0
         anomaly = tv_tensors.Mask(torch.tensor(anomaly,dtype=torch.bool))
 
         if self.semantic_dataset is None:
+            img = np.array(Image.open(self.images[idx]).convert("RGB"))
+
             return img, anomaly
 
         _, target = self.semantic_dataset[idx]
 
+        contaminated_img = Image.open(self.images[idx]).convert("RGB")
+        contaminated_img = np.array(contaminated_img)
+
         target["anomaly_mask"] = anomaly
 
-        return img, target
+        return contaminated_img, target
