@@ -1,0 +1,37 @@
+trainer:
+  max_epochs: 3
+model:
+  class_path: training.mask_classification_semantic_oe.MaskClassificationSemanticOE
+  init_args:
+    anomaly_weight: 0.1
+    anomaly_margin: 5.0
+    anomaly_reduction: mean
+    freeze_only_head: True
+    freeze_only_query: False
+    attn_mask_annealing_enabled: True
+    attn_mask_annealing_start_steps:
+      [3317,8292,13268]
+    attn_mask_annealing_end_steps:
+      [6634,11609,16585]
+    network:
+      class_path: models.eomt.EoMT
+      init_args:
+        num_q: 100
+        num_blocks: 3
+        encoder:
+          class_path: models.vit.ViT
+          init_args:
+            backbone_name:
+              vit_base_patch14_reg4_dinov2
+data:
+  class_path:
+    datasets.cityscapes_semantic_oe.CityscapesSemanticOE
+  init_args:
+    path:
+      /content/drive/MyDrive/Anomaly_Validation_Datasets/Cityscapes
+    coco_root:
+      /content/drive/MyDrive/Anomaly_Validation_Datasets/COCO
+    p_ood: 0.1
+    img_size: [640,640]
+    batch_size: 4
+    num_workers: 4

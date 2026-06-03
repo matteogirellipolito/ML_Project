@@ -1,6 +1,8 @@
 import random
-import numpy as np
+import json
+from pathlib import Path
 
+import numpy as np
 from PIL import Image
 from scipy.ndimage import gaussian_filter
 
@@ -29,153 +31,113 @@ VALID_CATEGORIES = {
 }
 
 def rgb2id(color):
-    if len(color.shape) == 3:
-        return (
-            color[:,:,0].astype(np.int64)
-            + 256 * color[:,:,1].astype(np.int64)
-            + 256*256*color[:,:,2].astype(np.int64)
-        )
-    return color
 
-def adaptive_resize(
-    obj_img,
-    obj_mask,
-    city_img,
-    min_frac=0.35,
-    max_frac=0.60,
-):
-    city_h = city_img.shape[0]
-    target_size = np.random.uniform(min_frac,max_frac) * city_h
-    h,w = obj_img.shape[:2]
-    scale = target_size / max(h,w)
-
-    new_h = max(60, int(h*scale))
-    new_w = max(60, int(w*scale))
-    new_h = min(new_h,800)
-    new_w = min(new_w,800)
-
-    obj_img = np.array(Image.fromarray(obj_img).resize((new_w,new_h),Image.BILINEAR))
-    obj_mask = np.array(Image.fromarray(obj_mask.astype(np.uint8)*255).resize((new_w,new_h),Image.NEAREST)) > 0
-
-    return obj_img,obj_mask
-
-def contaminate_cityscapes_image(
-    city_path,
-    pano,
-    coco_img_dir,
-    panoptic_mask_dir,
-):
-    city_img = np.array(Image.open(city_path).convert("RGB"))
-    valid = False
-
-    while not valid:
-        ann = random.choice(pano["annotations"])
-        segments = [
-            s for s in ann["segments_info"]
-            if s["category_id"] in VALID_CATEGORIES.keys()
-            and s["area"] > 1500
-            and s["iscrowd"] == 0
-        ]
-
-        if len(segments) == 0:
-            continue
-
-        seg = random.choice(segments)
-        bbox = seg["bbox"]
-        
-        if seg["area"] > 8000 and bbox[2]*bbox[3] > 10000:
-            valid = True
-
-    mask_rgb = np.array(Image.open(panoptic_mask_dir + "/" + ann["file_name"]))
-    ids = rgb2id(mask_rgb)
-    inst_mask = ids == seg["id"]
-    ys,xs = np.where(inst_mask)
-
-    if len(xs) == 0:
-        return contaminate_cityscapes_image(
-            city_path,
-            pano,
-            coco_img_dir,
-            panoptic_mask_dir
-        )
-
-    coco_name = ann["file_name"].replace(".png",".jpg")
-    coco_img = np.array(Image.open(coco_img_dir + "/" + coco_name).convert("RGB"))
-
-    bx, by, bw, bh = seg["bbox"]
-    mask_y1, mask_y2 = ys.min(), ys.max()
-    mask_x1, mask_x2 = xs.min(), xs.max()
-    x1 = int(min(mask_x1, bx))
-    y1 = int(min(mask_y1, by))
-    x2 = int(max(mask_x2, bx + bw))
-    y2 = int(max(mask_y2, by + bh))
-
-    obj_h = y2 - y1
-    obj_w = x2 - x1
-
-    pad_y = int(obj_h * 0.50)
-    pad_x = int(obj_w * 0.50)
-
-    y1 = max(0, y1 - pad_y)
-    y2 = min(coco_img.shape[0], y2 + pad_y)
-
-    x1 = max(0, x1 - pad_x)
-    x2 = min(coco_img.shape[1], x2 + pad_x)
-
-    crop_img = coco_img[y1:y2,x1:x2]
-    crop_mask = inst_mask[y1:y2,x1:x2]
-
-    obj_img,obj_mask = adaptive_resize(
-        crop_img,
-        crop_mask,
-        city_img
+    return (
+        color[:,:,0].astype(np.int64)
+        + 256 * color[:,:,1].astype(np.int64)
+        + 256*256 * color[:,:,2].astype(np.int64)
     )
 
-    result = city_img.copy()
+class COCOPaster:
 
-    H, W = result.shape[:2]
-    oh, ow = obj_img.shape[:2]
+    def __init__(
+        self,
+        coco_root,
+        target_height_range=(80,250),
+    ):
 
-    # Se oggetto è enorme, rigenera uno
-    if oh >= H or ow >= W:
+        coco_root = Path(coco_root)
 
-        return contaminate_cityscapes_image(
-            city_path,
-            pano,
-            coco_img_dir,
-            panoptic_mask_dir
+        self.coco_img_dir = (
+            coco_root /
+            "val2017.zip" /
+            "val2017"
         )
 
-    # Placement valido
-    min_x = W // 3
-    max_x = W - ow - 1
-
-    min_y = H // 2
-    max_y = H - oh - 1
-
-    # Se non entra nella regione desiderata
-    # ricampiona un altro oggetto
-    if max_x <= min_x or max_y <= min_y:
-        return contaminate_cityscapes_image(
-            city_path,
-            pano,
-            coco_img_dir,
-            panoptic_mask_dir
+        self.panoptic_dir = (
+            coco_root /
+            "panoptic_annotations_trainval2017.zip" /
+            "annotations" /
+            "panoptic_val2017.zip" /
+            "panoptic_val2017"
         )
 
-    x = np.random.randint(min_x,max_x)
-    y = np.random.randint(min_y,max_y)
+        json_path = (
+            coco_root /
+            "panoptic_annotations_trainval2017.zip" /
+            "annotations" /
+            "panoptic_val2017.json"
+        )
 
-    region = result[y:y+oh,x:x+ow]
-    soft_mask = gaussian_filter(obj_mask.astype(float),sigma=1.2)
-    soft_mask = np.clip(soft_mask,0,1)
-    alpha = soft_mask[..., None]
-    blended = (region * (1 - alpha) + obj_img * alpha).astype(np.uint8)
+        with open(json_path) as f:
+            self.panoptic = json.load(f)
 
-    region[obj_mask] = blended[obj_mask]
-    result[y:y+oh,x:x+ow] = region
+        self.target_height_range = target_height_range
 
-    anomaly_mask = np.zeros((H,W),dtype=np.uint8)
-    anomaly_mask[y:y+oh,x:x+ow][obj_mask] = 1
+    def sample_object(self):
 
-    return result, anomaly_mask
+        while True:
+            ann = random.choice(self.panoptic["annotations"])
+
+            candidates = [
+                s for s in ann["segments_info"]
+                if s["category_id"] in VALID_CATEGORIES
+                and s["area"] > 1500
+                and s["iscrowd"] == 0
+            ]
+
+            if len(candidates):
+                seg = random.choice(candidates)
+
+                return ann, seg
+
+    def paste(self, city_img):
+        city_img = np.array(city_img)
+
+        ann, seg = self.sample_object()
+
+        mask_rgb = np.array(Image.open(self.panoptic_dir / ann["file_name"]))
+
+        ids = rgb2id(mask_rgb)
+        mask = ids == seg["id"]
+
+        ys, xs = np.where(mask)
+
+        coco_name = ann["file_name"].replace(".png",".jpg")
+        coco_img = np.array(Image.open(self.coco_img_dir / coco_name).convert("RGB"))
+
+        crop = coco_img[ ys.min():ys.max() , xs.min():xs.max() ]
+
+        crop_mask = mask[ ys.min():ys.max() , xs.min():xs.max() ]
+
+        target_h = random.randint(*self.target_height_range)
+        scale = target_h / crop.shape[0]
+        new_w = int(crop.shape[1] * scale)
+
+        crop = np.array(Image.fromarray(crop).resize((new_w,target_h)))
+        crop_mask = np.array(Image.fromarray(crop_mask.astype(np.uint8)*255)
+                             .resize(
+                                 (new_w,target_h),
+                                    Image.NEAREST) 
+                                    ) > 0
+
+        H,W = city_img.shape[:2]
+
+        if new_w >= W or target_h >= H:
+            return self.paste(city_img)
+
+        x = random.randint(W//3,W-new_w-1)
+        y = random.randint(H//2,H-target_h-1)
+
+        alpha = gaussian_filter(crop_mask.astype(float),sigma=1.0)
+        alpha = alpha[...,None]
+
+        region = city_img[y:y+target_h,x:x+new_w]
+        blend = (region*(1-alpha) + crop*alpha).astype(np.uint8)
+        region[crop_mask] = blend[crop_mask]
+        city_img[y:y+target_h,x:x+new_w] = region
+
+        anomaly_mask = np.zeros((H,W),dtype=np.uint8)
+        anomaly_mask[y:y+target_h,x:x+new_w][crop_mask] = 1
+
+        return city_img, anomaly_mask.astype(np.uint8)
