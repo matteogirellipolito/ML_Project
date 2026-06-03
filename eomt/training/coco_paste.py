@@ -55,15 +55,12 @@ class COCOPaster:
 
         self.panoptic_dir = (
             coco_root /
-            "panoptic_annotations_trainval2017" /
             "annotations" /
-            "panoptic_val2017.zip" /
             "panoptic_val2017"
         )
 
         json_path = (
             coco_root /
-            "panoptic_annotations_trainval2017" /
             "annotations" /
             "panoptic_val2017.json"
         )
