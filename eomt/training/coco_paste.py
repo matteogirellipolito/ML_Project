@@ -50,13 +50,12 @@ class COCOPaster:
 
         self.coco_img_dir = (
             coco_root /
-            "val2017.zip" /
             "val2017"
         )
 
         self.panoptic_dir = (
             coco_root /
-            "panoptic_annotations_trainval2017.zip" /
+            "panoptic_annotations_trainval2017" /
             "annotations" /
             "panoptic_val2017.zip" /
             "panoptic_val2017"
@@ -64,7 +63,7 @@ class COCOPaster:
 
         json_path = (
             coco_root /
-            "panoptic_annotations_trainval2017.zip" /
+            "panoptic_annotations_trainval2017" /
             "annotations" /
             "panoptic_val2017.json"
         )
