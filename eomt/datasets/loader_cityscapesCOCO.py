@@ -36,34 +36,17 @@ class CityscapesCOCO(Dataset):
 
     def __getitem__(self, idx):
 
-        img = Image.open(
-            self.images[idx]
-        ).convert("RGB")
-
-        anomaly = np.array(
-            Image.open(self.masks[idx])
-        ) > 0
-
-        anomaly = tv_tensors.Mask(
-            torch.tensor(
-                anomaly,
-                dtype=torch.bool
-            )
-        )
+        img = Image.open(self.images[idx]).convert("RGB")
+        anomaly = np.array(Image.open(self.masks[idx])) > 0
+        anomaly = tv_tensors.Mask(torch.tensor(anomaly,dtype=torch.bool))
 
         if self.semantic_dataset is None:
-            img = torch.from_numpy(
-                np.array(img)
-            ).permute(2,0,1).float() / 255.0
+            img = torch.from_numpy(np.array(img)).permute(2,0,1).float() / 255.0
 
             return img, anomaly
 
         _, target = self.semantic_dataset[idx]
-
-        img = torch.from_numpy(
-            np.array(img)
-        ).permute(2,0,1).float() / 255.0
-
+        img = torch.from_numpy(np.array(img)).permute(2,0,1).float() / 255.0
         target["anomaly_mask"] = anomaly
 
         return img, target
