@@ -23,12 +23,17 @@ class WrapperOE:
         img, target = self.dataset[idx]
 
         if random.random() < self.p_ood:
-            img, anomaly = self.paster.paste(img)
+
+            img_hwc = img.permute(1,2,0).cpu().numpy()
+            img_hwc, anomaly = self.paster.paste(img_hwc)
+            img = torch.from_numpy(img_hwc).permute(2,0,1)
+
             target["ood_mask"] = torch.tensor(anomaly,dtype=torch.bool)
 
         else:
-            h, w = img.shape[:2]
-            target["ood_mask"] = torch.zeros((h, w),dtype=torch.bool)
+            h, w = img.shape[-2:]
+
+            target["ood_mask"] = torch.zeros((h,w),dtype=torch.bool)
 
         return img, target
 
