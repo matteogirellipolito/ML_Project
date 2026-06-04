@@ -143,7 +143,7 @@ class MaskClassificationSemanticOE(
 
         for t in targets:
 
-            m = t.get("anomaly_mask")
+            m = t.get("ood_mask")
 
             if m is None:
 
