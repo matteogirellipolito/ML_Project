@@ -2,7 +2,7 @@ import random
 import torch
 
 from datasets.cityscapes_semantic import CityscapesSemantic
-from training.coco_paste import COCOPaster
+from eomt.training.coco_paste_onthefly import COCOPaster
 
 class WrapperOE:
 
