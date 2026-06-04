@@ -1,10 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from training.mask_classification_semantic import (
-    MaskClassificationSemantic
-)
-
+from training.mask_classification_semantic import MaskClassificationSemantic
 
 class MaskClassificationSemanticOE(
     MaskClassificationSemantic
@@ -12,164 +9,50 @@ class MaskClassificationSemanticOE(
 
     def __init__(
         self,
-        anomaly_weight=0.1,
-        anomaly_margin=5.0,
-        anomaly_reduction="mean",
-
-        freeze_only_head=False,
-        freeze_only_query=False,
-
+        lambda_oe=0.1,
+        tuning_mode="head",
         **kwargs
     ):
 
         super().__init__(**kwargs)
 
-        self.anomaly_weight = anomaly_weight
-        self.anomaly_margin = anomaly_margin
-        self.anomaly_reduction = anomaly_reduction
+        self.lambda_oe = lambda_oe
+        self.tuning_mode = tuning_mode
+        self.apply_freezing()
 
-        self.freeze_only_head = freeze_only_head
-        self.freeze_only_query = freeze_only_query
+    def apply_freezing(self):
+        mode = self.tuning_mode.lower()
 
-        if freeze_only_head:
-            self.freeze_only_heads()
-
-        if freeze_only_query:
-            self.freeze_only_queries()    
-
-    def freeze_only_heads(self):
-
-        for p in self.network.parameters():
-            p.requires_grad = False
-
-        for module_name in ["class_head", "mask_head"]:
-
-            module = getattr(
-                self.network,
-                module_name,
-                None
-            )
-
-            if module is None:
-                continue
-
-            for p in module.parameters():
+        if mode == "joint":
+            for p in self.network.parameters():
                 p.requires_grad = True
+            return
 
-    def freeze_only_queries(self):
+        for name,param in self.network.named_parameters():
+            name = name.lower()
+            trainable = False
 
-        for p in self.network.parameters():
-            p.requires_grad = False
+            if mode == "head":
+                if "class" in name or "mask" in name:
+                    trainable = True
+            elif mode == "query":
+                if "query" in name:
+                    trainable = True
 
-        found = False
+            param.requires_grad = trainable
 
-        for name, p in self.network.named_parameters():
-
-            lname = name.lower()
-
-            if (
-                "query" in lname
-                or "queries" in lname
-                or "query_embed" in lname
-            ):
-
-                p.requires_grad = True
-                found = True
-
-        if not found:
-            raise RuntimeError(
-                "No query parameters found."
-            )
-
-    def anomaly_hinge_loss(
+    def anomaly_loss(
         self,
-        logits,
-        anomaly_mask,
+        class_logits,
+        anomaly_masks
     ):
+        probs = class_logits.softmax(-1)
+        confidence,_ = probs.max(dim=-1)
 
-        anomaly_mask = anomaly_mask.bool()
+        anomaly_score = confidence.mean()
+        anomaly_presence = anomaly_masks.float().mean()
 
-        if not anomaly_mask.any():
-
-            return logits.new_zeros(())
-
-        score = torch.tanh(logits)
-
-        anomaly_score = -score.sum(dim=1)
-
-        loss_map = F.relu(
-            self.anomaly_margin - anomaly_score
-        ).pow(2)
-
-        selected = loss_map[anomaly_mask]
-
-        if self.anomaly_reduction == "sum":
-            return selected.sum()
-
-        return selected.mean()
-    
-    def clean_targets(
-        self,
-        targets
-    ):
-
-        cleaned = []
-
-        for t in targets:
-
-            cleaned.append(
-                {
-                    "masks":
-                        t["masks"].to(
-                            self.device
-                        ).bool(),
-
-                    "labels":
-                        t["labels"].to(
-                            self.device
-                        ).long(),
-                }
-            )
-
-        return cleaned
-
-    def batch_anomaly_masks(
-        self,
-        targets,
-        size,
-    ):
-
-        masks = []
-
-        for t in targets:
-
-            m = t.get("ood_mask")
-
-            if m is None:
-
-                m = torch.zeros(
-                    size,
-                    dtype=torch.bool,
-                    device=self.device
-                )
-
-            else:
-
-                m = m.to(self.device)
-
-                if tuple(m.shape[-2:]) != tuple(size):
-
-                    m = F.interpolate(
-                        m[None,None].float(),
-                        size=size,
-                        mode="nearest"
-                    )[0,0]
-
-                m = m.bool()
-
-            masks.append(m)
-
-        return torch.stack(masks)  
+        return anomaly_score * anomaly_presence
 
     def training_step(
         self,
@@ -179,104 +62,38 @@ class MaskClassificationSemanticOE(
 
         imgs, targets = batch
 
-        clean_targets = self.clean_targets(
+        mask_logits_layers, class_logits_layers = self(imgs)
+        mask_logits = mask_logits_layers[-1]
+        class_logits = class_logits_layers[-1]
+
+        semantic_loss = self.criterion(
+            mask_logits,
+            class_logits,
             targets
         )
 
-        anomaly_masks = self.batch_anomaly_masks(
-            targets,
-            imgs.shape[-2:]
-        )
+        anomaly_masks = torch.stack([
+            t["anomaly_mask"]
+            for t in targets
+        ]).to(self.device)
 
-        mask_logits_blocks, class_logits_blocks = self(
-            imgs
-        )
-
-        losses = {}
-
-        for i, (m, c) in enumerate(
-
-            zip(
-                mask_logits_blocks,
-                class_logits_blocks
-            )
-        ):
-
-            block_losses = self.criterion(
-
-                masks_queries_logits=m,
-
-                class_queries_logits=c,
-
-                targets=clean_targets
-            )
-
-            postfix = self.block_postfix(i)
-
-            losses |= {
-
-                f"{k}{postfix}": v
-
-                for k,v in block_losses.items()
-            }
-
-        segmentation_loss = self.criterion.loss_total(
-            losses,
-            self.log
-        )
-
-        final_mask_logits = mask_logits_blocks[-1]
-
-        if final_mask_logits.shape[-2:] != imgs.shape[-2:]:
-
-            final_mask_logits = F.interpolate(
-
-                final_mask_logits,
-
-                size=imgs.shape[-2:],
-
-                mode="bilinear",
-
-                align_corners=False
-            )
-
-        pixel_logits = self.to_per_pixel_logits_semantic(
-
-            final_mask_logits,
-
-            class_logits_blocks[-1]
-        )
-
-        anomaly_loss = self.anomaly_hinge_loss(
-
-            pixel_logits,
-
+        oe_loss = self.anomaly_loss(
+            class_logits,
             anomaly_masks
         )
 
-        total_loss = (
-
-            segmentation_loss
-
-            + self.anomaly_weight * anomaly_loss
-        )
+        loss = semantic_loss + self.lambda_oe * oe_loss
 
         self.log(
-            "train/segmentation_loss",
-            segmentation_loss,
+            "train_loss",
+            loss,
             prog_bar=True
         )
 
         self.log(
-            "train/anomaly_loss",
-            anomaly_loss,
+            "oe_loss",
+            oe_loss,
             prog_bar=True
         )
 
-        self.log(
-            "train/total_loss",
-            total_loss,
-            prog_bar=True
-        )
-
-        return total_loss
+        return loss
