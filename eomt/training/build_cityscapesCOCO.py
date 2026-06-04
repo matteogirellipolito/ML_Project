@@ -5,7 +5,7 @@ import json
 from tqdm import tqdm
 from PIL import Image
 
-from eomt.training.coco_paste import contaminate_cityscapes_image
+from training.coco_paste import contaminate_cityscapes_image
 
 
 def build_dataset(
