@@ -6,7 +6,7 @@ import torch
 
 from torch.utils.data import Dataset
 from torchvision import tv_tensors
-
+import torchvision.transforms.functional as TF
 
 class CityscapesCOCO(Dataset):
 
@@ -36,17 +36,52 @@ class CityscapesCOCO(Dataset):
 
     def __getitem__(self, idx):
 
-        img = Image.open(self.images[idx]).convert("RGB")
-        anomaly = np.array(Image.open(self.masks[idx])) > 0
-        anomaly = tv_tensors.Mask(torch.tensor(anomaly,dtype=torch.bool))
+        img = Image.open(
+            self.images[idx]
+        ).convert("RGB")
+
+        anomaly = Image.open(
+            self.masks[idx]
+        )
 
         if self.semantic_dataset is None:
-            img = torch.from_numpy(np.array(img)).permute(2,0,1).float() / 255.0
+
+            img = torch.from_numpy(
+                np.array(img)
+            ).permute(2,0,1).float()/255.
+
+            anomaly = torch.tensor(
+                np.array(anomaly) > 0,
+                dtype=torch.bool
+            )
+
+            anomaly = tv_tensors.Mask(anomaly)
 
             return img, anomaly
 
         _, target = self.semantic_dataset[idx]
-        img = torch.from_numpy(np.array(img)).permute(2,0,1).float() / 255.0
+
+        img = torch.from_numpy(
+            np.array(img)
+        ).permute(2,0,1).float()/255.
+
+        target_h, target_w = target["masks"].shape[-2:]
+
+        anomaly = TF.resize(
+            anomaly,
+            [target_h, target_w],
+            interpolation=TF.InterpolationMode.NEAREST
+        )
+
+        anomaly = np.array(anomaly) > 0
+
+        anomaly = tv_tensors.Mask(
+            torch.tensor(
+                anomaly,
+                dtype=torch.bool
+            )
+        )
+
         target["anomaly_mask"] = anomaly
 
         return img, target
