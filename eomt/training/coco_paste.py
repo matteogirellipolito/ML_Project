@@ -55,7 +55,7 @@ class COCOPaster:
 
         self.panoptic_dir = (
             coco_root /
-            "annotations" /
+            "panoptic_val2017" /
             "panoptic_val2017"
         )
 
