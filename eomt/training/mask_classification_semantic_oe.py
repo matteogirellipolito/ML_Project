@@ -65,29 +65,11 @@ class MaskClassificationSemanticOE(
         mask_logits_layers, class_logits_layers = self(imgs)
         mask_logits = mask_logits_layers[-1]
         class_logits = class_logits_layers[-1]
-        
-        print("\n===== DEBUG TARGET =====")
-
-        for i,t in enumerate(targets):
-
-            print("sample",i)
-
-            print("masks shape:",t["masks"].shape)
-
-            print("labels shape:",t["labels"].shape)
-
-            print("is_crowd shape:",t["is_crowd"].shape)
-
-            print("anomaly shape:",t["anomaly_mask"].shape)
-
-            print("masks dtype:",t["masks"].dtype)
-
-            print("----------------")
 
         semantic_loss = self.criterion(
             mask_logits,
-            class_logits,
-            targets
+            targets,
+            class_logits
         )
 
         anomaly_masks = torch.stack([

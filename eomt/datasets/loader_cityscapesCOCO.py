@@ -29,13 +29,7 @@ class CityscapesCOCO(Dataset):
 
     def __getitem__(self,idx):
         sem_img, target = self.semantic_dataset[idx]
-        print("\nLOADER DEBUG")
 
-        print(type(target["masks"]))
-
-        print(target["masks"].shape)
-
-        print(target["labels"].shape)
         contam = np.array(Image.open(self.images[idx]).convert("RGB"))
         contam = torch.from_numpy(contam).permute(2,0,1).float()
         contam = torch.nn.functional.interpolate(
