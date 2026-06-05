@@ -29,7 +29,13 @@ class CityscapesCOCO(Dataset):
 
     def __getitem__(self,idx):
         sem_img, target = self.semantic_dataset[idx]
+        print("\nLOADER DEBUG")
 
+        print(type(target["masks"]))
+
+        print(target["masks"].shape)
+
+        print(target["labels"].shape)
         contam = np.array(Image.open(self.images[idx]).convert("RGB"))
         contam = torch.from_numpy(contam).permute(2,0,1).float()
         contam = torch.nn.functional.interpolate(
@@ -48,6 +54,9 @@ class CityscapesCOCO(Dataset):
         )[0,0].bool()
 
         target["anomaly_mask"] = tv_tensors.Mask(anomaly)
+
+        if len(target["masks"].shape) == 2:
+            target["masks"] = tv_tensors.Mask(target["masks"].unsqueeze(0))
 
         return contam, target
     
