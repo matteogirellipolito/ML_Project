@@ -31,7 +31,7 @@ class CityscapesCOCO(Dataset):
         sem_img, target = self.semantic_dataset[idx]
 
         contam = np.array(Image.open(self.images[idx]).convert("RGB"))
-        contam = torch.from_numpy(contam).permute(2,0,1).float()/255.
+        contam = torch.from_numpy(contam).permute(2,0,1).float()
         contam = torch.nn.functional.interpolate(
             contam.unsqueeze(0),
             size=sem_img.shape[-2:],
