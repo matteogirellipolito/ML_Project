@@ -66,12 +66,14 @@ class MaskClassificationSemanticOE(
         mask_logits = mask_logits_layers[-1]
         class_logits = class_logits_layers[-1]
 
-        semantic_loss = self.criterion(
+        semantic_losses = self.criterion(
             mask_logits,
             targets,
             class_logits
         )
-
+        
+        semantic_loss = sum(semantic_losses.values())
+        
         anomaly_masks = torch.stack([
             t["anomaly_mask"]
             for t in targets
@@ -84,16 +86,30 @@ class MaskClassificationSemanticOE(
 
         loss = semantic_loss + self.lambda_oe * oe_loss
 
-        self.log(
-            "train_loss",
-            loss,
-            prog_bar=True
-        )
+        for name,val in semantic_losses.items():
 
-        self.log(
-            "oe_loss",
-            oe_loss,
-            prog_bar=True
-        )
+            self.log(
+                f"train/{name}",
+                val,
+                prog_bar=False,
+                on_step=True,
+                on_epoch=True,
+            )
+
+            self.log(
+                "train/semantic_loss",
+                semantic_loss,
+                prog_bar=True,
+                on_step=True,
+                on_epoch=True,
+            )
+
+            self.log(
+                "train/oe_loss",
+                oe_loss,
+                prog_bar=True,
+                on_step=True,
+                on_epoch=True,
+            )
 
         return loss
