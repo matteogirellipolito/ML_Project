@@ -71,7 +71,10 @@ class MaskClassificationSemanticOE(
             targets,
             class_logits
         )
-        
+        print(semantic_losses.keys())
+
+        for k,v in semantic_losses.items():
+            print(k, v)
         semantic_loss = sum(semantic_losses.values())
         
         anomaly_masks = torch.stack([
