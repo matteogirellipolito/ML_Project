@@ -49,9 +49,6 @@ class CityscapesCOCO(Dataset):
 
         target["anomaly_mask"] = tv_tensors.Mask(anomaly)
 
-        if len(target["masks"].shape) == 2:
-            target["masks"] = tv_tensors.Mask(target["masks"].unsqueeze(0))
-
         return contam, target
     
 """
