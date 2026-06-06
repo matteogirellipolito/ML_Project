@@ -92,12 +92,6 @@ class MaskClassificationSemanticOE(
 
         loss = semantic_loss + self.lambda_oe * oe_loss
 
-        #TOGLIERE DOPO
-        if batch_idx % 100 == 0:
-            print("semantic:", semantic_loss)
-            print("oe:", oe_loss)
-            print("weighted:", self.lambda_oe * oe_loss)
-
         for name,val in semantic_losses.items():
 
             self.log(
