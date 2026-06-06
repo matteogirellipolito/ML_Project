@@ -16,6 +16,10 @@ class MaskClassificationSemanticOE(
 
         super().__init__(**kwargs)
 
+        self.save_hyperparameters(
+            ignore=["network"]
+        )
+
         self.lambda_oe = lambda_oe
         self.tuning_mode = tuning_mode
         self.apply_freezing()
@@ -62,6 +66,8 @@ class MaskClassificationSemanticOE(
 
         imgs, targets = batch
 
+        batch_size = imgs.shape[0]
+
         mask_logits_layers, class_logits_layers = self(imgs)
         mask_logits = mask_logits_layers[-1]
         class_logits = class_logits_layers[-1]
@@ -71,10 +77,7 @@ class MaskClassificationSemanticOE(
             targets,
             class_logits
         )
-        print(semantic_losses.keys())
-
-        for k,v in semantic_losses.items():
-            print(k, v)
+        
         semantic_loss = sum(semantic_losses.values())
         
         anomaly_masks = torch.stack([
@@ -89,30 +92,39 @@ class MaskClassificationSemanticOE(
 
         loss = semantic_loss + self.lambda_oe * oe_loss
 
+        #TOGLIERE DOPO
+        if batch_idx % 100 == 0:
+            print("semantic:", semantic_loss)
+            print("oe:", oe_loss)
+            print("weighted:", self.lambda_oe * oe_loss)
+
         for name,val in semantic_losses.items():
 
             self.log(
                 f"train/{name}",
                 val,
+                batch_size=batch_size,
                 prog_bar=False,
                 on_step=True,
                 on_epoch=True,
             )
 
-            self.log(
-                "train/semantic_loss",
-                semantic_loss,
-                prog_bar=True,
-                on_step=True,
-                on_epoch=True,
-            )
+        self.log(
+            "train/semantic_loss",
+            semantic_loss,
+            batch_size=batch_size,
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+        )
 
-            self.log(
-                "train/oe_loss",
-                oe_loss,
-                prog_bar=True,
-                on_step=True,
-                on_epoch=True,
-            )
+        self.log(
+            "train/oe_loss",
+            oe_loss,
+            batch_size=batch_size,
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+        )
 
         return loss
