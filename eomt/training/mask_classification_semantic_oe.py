@@ -121,4 +121,31 @@ class MaskClassificationSemanticOE(
             on_epoch=True,
         )
 
+        self.log(
+            "train/total_loss",
+            loss,
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+            batch_size=batch_size
+        )
+
+        self.log(
+            "train/anomaly_pixels",
+            anomaly_masks.float().mean(),
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+            batch_size=batch_size
+        )
+
+        self.log(
+            "train/weighted_oe",
+            self.lambda_oe * oe_loss,
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+            batch_size=batch_size
+        )
+
         return loss
