@@ -159,7 +159,7 @@ def main(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
 
-    parser.add_argument("--datadir",default="/content/drive/MyDrive/Anomaly_Validation_Datasets/Cityscapes_val")
+    parser.add_argument("--datadir",default="/content/drive/MyDrive/Anomaly_Validation_Datasets/Cityscapes")
 
     parser.add_argument("--subset",default="val",choices=["train", "val", "test"])
     
