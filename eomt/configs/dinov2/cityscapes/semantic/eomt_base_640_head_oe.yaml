@@ -10,8 +10,6 @@ model:
   init_args:
     tuning_mode: "head"
     lambda_oe: 5.0
-    img_size: [1024,1024]
-    num_classes: 19
     attn_mask_annealing_enabled: True
     attn_mask_annealing_start_steps: [3317,8292,13268]
     attn_mask_annealing_end_steps: [6634,11609,16585]
