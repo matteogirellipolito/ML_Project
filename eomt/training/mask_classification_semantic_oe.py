@@ -99,7 +99,7 @@ class MaskClassificationSemanticOE(
                 val,
                 batch_size=batch_size,
                 prog_bar=False,
-                on_step=True,
+                on_step=False,
                 on_epoch=True,
             )
 
@@ -108,16 +108,7 @@ class MaskClassificationSemanticOE(
             semantic_loss,
             batch_size=batch_size,
             prog_bar=True,
-            on_step=True,
-            on_epoch=True,
-        )
-
-        self.log(
-            "train/oe_loss",
-            oe_loss,
-            batch_size=batch_size,
-            prog_bar=True,
-            on_step=True,
+            on_step=False,
             on_epoch=True,
         )
 
@@ -125,7 +116,7 @@ class MaskClassificationSemanticOE(
             "train/total_loss",
             loss,
             prog_bar=True,
-            on_step=True,
+            on_step=False,
             on_epoch=True,
             batch_size=batch_size
         )
@@ -134,7 +125,7 @@ class MaskClassificationSemanticOE(
             "train/anomaly_pixels",
             anomaly_masks.float().mean(),
             prog_bar=True,
-            on_step=True,
+            on_step=False,
             on_epoch=True,
             batch_size=batch_size
         )
@@ -143,7 +134,7 @@ class MaskClassificationSemanticOE(
             "train/weighted_oe",
             self.lambda_oe * oe_loss,
             prog_bar=True,
-            on_step=True,
+            on_step=False,
             on_epoch=True,
             batch_size=batch_size
         )

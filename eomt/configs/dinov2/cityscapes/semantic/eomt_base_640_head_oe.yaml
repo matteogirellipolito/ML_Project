@@ -1,16 +1,17 @@
 trainer:
   max_epochs: 3
   logger:
-    class_path: lightning.pytorch.loggers.wandb.WandbLogger
+    class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
-      resume: allow
-      project: "eomt"
-      name: "eomt_base_640_head_oe"
+      project: "ProgettoML"
+      name: "head_oe_lambda5"
 model:
   class_path: training.mask_classification_semantic_oe.MaskClassificationSemanticOE
   init_args:
     tuning_mode: "head"
-    lambda_oe: 0.1
+    lambda_oe: 5.0
+    img_size: [1024,1024]
+    num_classes: 19
     attn_mask_annealing_enabled: True
     attn_mask_annealing_start_steps: [3317,8292,13268]
     attn_mask_annealing_end_steps: [6634,11609,16585]

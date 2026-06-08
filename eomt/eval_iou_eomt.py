@@ -46,7 +46,7 @@ def main(args):
     use_cuda = (not args.cpu) and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     
-    config_path = 'configs/dinov2/cityscapes/semantic/eomt_base_640.yaml'
+    config_path = args.config
     config = yaml.safe_load(open(config_path))
 
     encoder_cfg = config["model"]["init_args"]["network"]["init_args"]["encoder"]
@@ -73,7 +73,13 @@ def main(args):
     else:
         state_dict = torch.load(args.checkpoint, map_location=f"cuda:{0}", weights_only=True)
 
-    model.load_state_dict(state_dict, strict=False)
+    missing, unexpected = model.load_state_dict(
+        state_dict,
+        strict=False
+    )
+
+    print("Missing keys:", missing)
+    print("Unexpected keys:", unexpected)
 
     print('Model weights loaded succesfully')
     
@@ -164,6 +170,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=1)
     
     parser.add_argument("--checkpoint",type=str,default="/content/drive/MyDrive/ML_Project/eomt_cityscapes.bin")
+    
+    parser.add_argument("--config",type=str, default='configs/dinov2/cityscapes/semantic/eomt_base_640.yaml')
 
     args = parser.parse_args()
     main(args)
