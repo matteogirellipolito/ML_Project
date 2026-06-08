@@ -59,10 +59,18 @@ def main(args):
 
     model = lit_cls(img_size=(IMG_SIZE, IMG_SIZE),num_classes=19,network=network,**model_kwargs).eval().to(device)
 
-    if device.type == 'cpu':
-        state_dict = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+    if device.type == "cpu":
+        ckpt = torch.load(args.checkpoint, map_location="cpu")
     else:
-        state_dict = torch.load(args.checkpoint, map_location=f"cuda:{0}", weights_only=True)
+        ckpt = torch.load(args.checkpoint, map_location=device)
+
+    # supporta sia Lightning ckpt sia state_dict puro
+    if isinstance(ckpt, dict) and "state_dict" in ckpt:
+        print("Lightning checkpoint detected")
+        state_dict = ckpt["state_dict"]
+    else:
+        print("Raw state_dict detected")
+        state_dict = ckpt
 
     missing, unexpected = model.load_state_dict(
         state_dict,
