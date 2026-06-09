@@ -49,33 +49,17 @@ class CityscapesCOCO(Dataset):
 
         target["anomaly_mask"] = tv_tensors.Mask(anomaly)
 
-        return contam, target
-    
-"""
-File di prima:
+        if "masks" in target and target["masks"].numel() > 0:
+            visible_masks = (target["masks"].bool() & ~anomaly)
+            valid = visible_masks.flatten(1).any(dim=1)
 
+            if valid.any():
+                target["masks"] = tv_tensors.Mask(visible_masks[valid])
 
-FILE USATO:
-/content/ML_Project/eomt/datasets/loader_cityscapesCOCO.py
+                if "labels" in target:
+                    target["labels"] = target["labels"][valid]
 
-INIZIO __getitem__:
+                if "is_crowd" in target:
+                    target["is_crowd"] = target["is_crowd"][valid]
 
-    def __getitem__(self, idx):
-
-        img = Image.open(self.images[idx]).convert("RGB")
-        anomaly = np.array(Image.open(self.masks[idx])) > 0
-        anomaly = tv_tensors.Mask(torch.tensor(anomaly,dtype=torch.bool))
-
-        if self.semantic_dataset is None:
-            img = torch.from_numpy(np.array(img)).permute(2,0,1).float() / 255.0
-
-            return img, anomaly
-
-        _, target = self.semantic_dataset[idx]
-        img = torch.from_numpy(np.array(img)).permute(2,0,1).float() / 255.0
-        target["anomaly_mask"] = anomaly
-
-        return img, target
-
-
-"""
+        return contam, target 
