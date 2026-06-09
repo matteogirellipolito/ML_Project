@@ -91,7 +91,7 @@ class MaskClassificationSemanticOE(
         )
 
         loss = semantic_loss + self.lambda_oe * oe_loss
-
+        """
         for name,val in semantic_losses.items():
 
             self.log(
@@ -102,7 +102,7 @@ class MaskClassificationSemanticOE(
                 on_step=False,
                 on_epoch=True,
             )
-
+        """
         self.log(
             "train/semantic_loss",
             semantic_loss,
@@ -137,6 +137,13 @@ class MaskClassificationSemanticOE(
             on_step=False,
             on_epoch=True,
             batch_size=batch_size
+        )
+
+        self.log(
+            "train/lr",
+            self.optimizers().param_groups[0]["lr"],
+            on_step=True,
+            on_epoch=False
         )
 
         return loss
