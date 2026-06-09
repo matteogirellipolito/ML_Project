@@ -9,7 +9,8 @@ class MaskClassificationSemanticOE(
 
     def __init__(
         self,
-        lambda_oe=0.1,
+        lambda_rba=0.1,
+        rba_alpha=5.0,
         tuning_mode="head",
         **kwargs
     ):
@@ -20,7 +21,8 @@ class MaskClassificationSemanticOE(
             ignore=["network"]
         )
 
-        self.lambda_oe = lambda_oe
+        self.lambda_rba = lambda_rba
+        self.rba_alpha = rba_alpha
         self.tuning_mode = tuning_mode
         self.apply_freezing()
 
@@ -45,18 +47,22 @@ class MaskClassificationSemanticOE(
 
             param.requires_grad = trainable
 
-    def anomaly_loss(
-        self,
-        class_logits,
-        anomaly_masks
+    @staticmethod
+    def oe_loss(
+        logits,
+        anomaly_mask,
+        alpha=5.0,
     ):
-        probs = class_logits.softmax(-1)
-        confidence,_ = probs.max(dim=-1)
+        anomaly_mask = anomaly_mask.bool()
 
-        anomaly_score = confidence.mean()
-        anomaly_presence = anomaly_masks.float().mean()
+        if not anomaly_mask.any():
+            return logits.new_zeros(())
 
-        return anomaly_score * anomaly_presence
+        score = torch.tanh(logits)
+        rba = -score.sum(dim=1)
+        loss_map = F.relu(alpha-rba).pow(2)
+
+        return loss_map[anomaly_mask].mean()
 
     def training_step(
         self,
@@ -85,13 +91,11 @@ class MaskClassificationSemanticOE(
             for t in targets
         ]).to(self.device)
 
-        oe_loss = self.anomaly_loss(
-            class_logits,
-            anomaly_masks
-        )
+        per_pixel_logits = self.to_per_pixel_logits_semantic(mask_logits, class_logits)
+        ood_loss = self.oe_loss(per_pixel_logits, anomaly_masks, alpha=self.rba_alpha)
 
-        loss = semantic_loss + self.lambda_oe * oe_loss
-        """
+        loss = semantic_loss + self.lambda_rba * ood_loss
+
         for name,val in semantic_losses.items():
 
             self.log(
@@ -102,7 +106,7 @@ class MaskClassificationSemanticOE(
                 on_step=False,
                 on_epoch=True,
             )
-        """
+
         self.log(
             "train/semantic_loss",
             semantic_loss,
@@ -124,15 +128,6 @@ class MaskClassificationSemanticOE(
         self.log(
             "train/anomaly_pixels",
             anomaly_masks.float().mean(),
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-            batch_size=batch_size
-        )
-
-        self.log(
-            "train/weighted_oe",
-            self.lambda_oe * oe_loss,
             prog_bar=True,
             on_step=False,
             on_epoch=True,
