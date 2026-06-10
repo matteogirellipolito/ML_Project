@@ -91,36 +91,41 @@ class MaskClassificationSemanticOE(
             for t in targets
         ]).to(self.device)
 
-        per_pixel_logits = self.to_per_pixel_logits_semantic(mask_logits, class_logits)
+        final_mask_logits = mask_logits_layers[-1]
+        if final_mask_logits.shape[-2:] != imgs.shape[-2:]:
+            final_mask_logits = F.interpolate(
+            final_mask_logits,
+            size=imgs.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )
+
+        per_pixel_logits = self.to_per_pixel_logits_semantic(final_mask_logits,class_logits_layers[-1])
         ood_loss = self.oe_loss(per_pixel_logits, anomaly_masks, alpha=self.rba_alpha)
 
         loss = semantic_loss + self.lambda_rba * ood_loss
 
-        for name,val in semantic_losses.items():
-
-            self.log(
-                f"train/{name}",
-                val,
-                batch_size=batch_size,
-                prog_bar=False,
-                on_step=False,
-                on_epoch=True,
-            )
+        self.log(
+            "train/total_loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=batch_size
+        )
 
         self.log(
             "train/semantic_loss",
             semantic_loss,
-            batch_size=batch_size,
-            prog_bar=True,
-            on_step=False,
+            on_step=True,
             on_epoch=True,
+            batch_size=batch_size
         )
 
         self.log(
-            "train/total_loss",
-            loss,
-            prog_bar=True,
-            on_step=False,
+            "train/ood_loss",
+            ood_loss,
+            on_step=True,
             on_epoch=True,
             batch_size=batch_size
         )
@@ -128,7 +133,6 @@ class MaskClassificationSemanticOE(
         self.log(
             "train/anomaly_pixels",
             anomaly_masks.float().mean(),
-            prog_bar=True,
             on_step=False,
             on_epoch=True,
             batch_size=batch_size
@@ -139,6 +143,14 @@ class MaskClassificationSemanticOE(
             self.optimizers().param_groups[0]["lr"],
             on_step=True,
             on_epoch=False
+        )
+
+        self.log(
+            "train/weighted_ood",
+            self.lambda_rba * ood_loss,
+            on_step=False,
+            on_epoch=True,
+            batch_size=batch_size
         )
 
         return loss
