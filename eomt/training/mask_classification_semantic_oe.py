@@ -87,7 +87,7 @@ class MaskClassificationSemanticOE(
         if batch_idx == 0:
             print(semantic_losses)
         
-        semantic_loss = sum(semantic_losses.values())
+        semantic_loss = self.criterion.loss_total(semantic_losses, lambda *args, **kwargs: None)
         
         anomaly_masks = torch.stack([
             t["anomaly_mask"]
