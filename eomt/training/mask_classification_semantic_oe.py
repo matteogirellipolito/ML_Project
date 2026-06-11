@@ -62,7 +62,7 @@ class MaskClassificationSemanticOE(
         rba = -score.sum(dim=1)
         loss_map = F.relu(alpha-rba).pow(2)
 
-        return loss_map[anomaly_mask].mean()
+        return loss_map[anomaly_mask].sum()
 
     def training_step(
         self,
@@ -77,12 +77,15 @@ class MaskClassificationSemanticOE(
         mask_logits_layers, class_logits_layers = self(imgs)
         mask_logits = mask_logits_layers[-1]
         class_logits = class_logits_layers[-1]
-
+ 
         semantic_losses = self.criterion(
             mask_logits,
             targets,
             class_logits
-        )
+        ) 
+ 
+        if batch_idx == 0:
+            print(semantic_losses)
         
         semantic_loss = sum(semantic_losses.values())
         
