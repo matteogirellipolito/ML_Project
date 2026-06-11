@@ -3,9 +3,7 @@ import torch.nn.functional as F
 
 from training.mask_classification_semantic import MaskClassificationSemantic
 
-class MaskClassificationSemanticOE(
-    MaskClassificationSemantic
-):
+class MaskClassificationSemanticOE(MaskClassificationSemantic):
 
     def __init__(
         self,
@@ -62,7 +60,7 @@ class MaskClassificationSemanticOE(
         rba = -score.sum(dim=1)
         loss_map = F.relu(alpha-rba).pow(2)
 
-        return loss_map[anomaly_mask].sum()
+        return loss_map[anomaly_mask].mean()
 
     def training_step(
         self,

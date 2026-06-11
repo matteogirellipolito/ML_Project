@@ -3,9 +3,7 @@ from torch.utils.data import DataLoader
 from datasets.cityscapes_semantic import CityscapesSemantic
 from datasets.loader_cityscapesCOCO import CityscapesCOCO
 
-class CityscapesSemanticOE(
-    CityscapesSemantic
-):
+class CityscapesSemanticOE(CityscapesSemantic):
 
     def __init__(
         self,

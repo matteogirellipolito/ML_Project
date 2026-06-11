@@ -4,7 +4,7 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: "ProgettoML"
-      name: "head_oe_lambda5"
+      name: "head_oe_RbA"
 model:
   class_path: training.mask_classification_semantic_oe.MaskClassificationSemanticOE
   init_args:
