@@ -7,7 +7,7 @@ class MaskClassificationSemanticOE(MaskClassificationSemantic):
 
     def __init__(
         self,
-        lambda_rba=0.05,
+        lambda_rba=0.1,
         rba_alpha=5.0,
         tuning_mode="head",
         **kwargs
@@ -41,6 +41,9 @@ class MaskClassificationSemanticOE(MaskClassificationSemantic):
                     trainable = True
             elif mode == "query":
                 if "query" in name:
+                    trainable = True
+            elif mode == "head_query":    
+                if ("class" in name or "mask" in name or "query" in name):
                     trainable = True
 
             param.requires_grad = trainable
