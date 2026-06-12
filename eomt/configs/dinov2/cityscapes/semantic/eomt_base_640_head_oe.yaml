@@ -9,7 +9,7 @@ model:
   class_path: training.mask_classification_semantic_oe.MaskClassificationSemanticOE
   init_args:
     tuning_mode: "head"
-    lambda_rba: 0.1
+    lambda_rba: 0.05
     rba_alpha: 5.0
     attn_mask_annealing_enabled: True
     attn_mask_annealing_start_steps: [3317,8292,13268]
