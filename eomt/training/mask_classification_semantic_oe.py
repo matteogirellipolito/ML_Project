@@ -71,21 +71,24 @@ class MaskClassificationSemanticOE(MaskClassificationSemantic):
         imgs, targets = batch
 
         batch_size = imgs.shape[0]
-
-        mask_logits_layers, class_logits_layers = self(imgs)
-        mask_logits = mask_logits_layers[-1]
-        class_logits = class_logits_layers[-1]
- 
-        semantic_losses = self.criterion(
-            mask_logits,
-            targets,
-            class_logits
-        ) 
- 
-        if batch_idx == 0:
-            print(semantic_losses)
         
-        semantic_loss = self.criterion.loss_total(semantic_losses, lambda *args, **kwargs: None)
+        mask_logits_layers, class_logits_layers = self(imgs)
+ 
+        losses_all_blocks = {}
+
+        for block_idx in range(len(mask_logits_layers)):
+            losses = self.criterion(
+            masks_queries_logits=mask_logits_layers[block_idx],
+            class_queries_logits=class_logits_layers[block_idx],
+            targets=targets,
+            )
+
+            suffix = self.block_postfix(block_idx)
+
+            for loss_name, loss_value in losses.items():
+                losses_all_blocks[f"{loss_name}{suffix}"] = loss_value
+
+        semantic_loss = self.criterion.loss_total(losses_all_blocks, lambda *args, **kwargs: None) 
         
         anomaly_masks = torch.stack([
             t["anomaly_mask"]
