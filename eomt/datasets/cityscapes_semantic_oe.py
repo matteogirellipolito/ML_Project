@@ -4,7 +4,6 @@ from datasets.cityscapes_semantic import CityscapesSemantic
 from datasets.loader_cityscapesCOCO import CityscapesCOCO
 
 class CityscapesSemanticOE(CityscapesSemantic):
-
     def __init__(
         self,
         contaminated_images,

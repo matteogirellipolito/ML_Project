@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from training.mask_classification_semantic import MaskClassificationSemantic
 
 class MaskClassificationSemanticOE(MaskClassificationSemantic):
-
     def __init__(
         self,
         lambda_rba=0.1,
@@ -32,13 +31,13 @@ class MaskClassificationSemanticOE(MaskClassificationSemantic):
             trainable = False
 
             if mode == "head":
-                if "class" in name or "mask" in name:
+                if "head" in name:
                     trainable = True
             elif mode == "query":
                 if name == "q.weight":
                     trainable = True
             elif mode == "head_query":    
-                if ("class" in name or "mask" in name or "q.weight" == name):
+                if ("head" in name or "q.weight" == name):
                     trainable = True
 
             param.requires_grad = trainable

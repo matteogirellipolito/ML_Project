@@ -8,7 +8,6 @@ from torch.utils.data import Dataset
 from torchvision import tv_tensors
 
 class CityscapesCOCO(Dataset):
-
     def __init__(
         self,
         image_dir,

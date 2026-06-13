@@ -7,7 +7,6 @@ from PIL import Image
 
 from training.coco_paste import contaminate_cityscapes_image
 
-
 def build_dataset(
     city_dir,
     pano_json,
