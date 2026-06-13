@@ -4,11 +4,11 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: "ProgettoML"
-      name: "query_oe_RbA"
+      name: "head_query_oe_RbA"
 model:
   class_path: training.mask_classification_semantic_oe.MaskClassificationSemanticOE
   init_args:
-    tuning_mode: "query"
+    tuning_mode: "head_query"
     lambda_rba: 0.1
     rba_alpha: 5.0
     attn_mask_annealing_enabled: True
