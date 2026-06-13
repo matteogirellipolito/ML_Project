@@ -14,13 +14,13 @@ class CityscapesCOCO(Dataset):
         image_dir,
         anomaly_dir,
         semantic_dataset=None,
-        p_ood=0.1
+        prob_oe=0.1
     ):
 
         self.images = sorted(Path(image_dir).rglob("*.png"))
         self.masks = sorted(Path(anomaly_dir).rglob("*.png"))
         self.semantic_dataset = semantic_dataset
-        self.p_ood = p_ood 
+        self.prob_oe = prob_oe 
 
         print("FOUND IMAGES:",len(self.images))
         print("FOUND MASKS:",len(self.masks))
@@ -32,7 +32,7 @@ class CityscapesCOCO(Dataset):
 
         sem_img, target = self.semantic_dataset[idx]
 
-        if random.random() > self.p_ood:
+        if random.random() > self.prob_oe:
             target["anomaly_mask"] = tv_tensors.Mask(torch.zeros(sem_img.shape[-2:], dtype=torch.bool))
             return sem_img, target
 

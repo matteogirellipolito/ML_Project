@@ -27,11 +27,6 @@ class MaskClassificationSemanticOE(MaskClassificationSemantic):
     def apply_freezing(self):
         mode = self.tuning_mode.lower()
 
-        if mode == "joint":
-            for p in self.network.parameters():
-                p.requires_grad = True
-            return
-
         for name,param in self.network.named_parameters():
             name = name.lower()
             trainable = False
@@ -40,10 +35,10 @@ class MaskClassificationSemanticOE(MaskClassificationSemantic):
                 if "class" in name or "mask" in name:
                     trainable = True
             elif mode == "query":
-                if "query" in name:
+                if name == "q.weight":
                     trainable = True
             elif mode == "head_query":    
-                if ("class" in name or "mask" in name or "query" in name):
+                if ("class" in name or "mask" in name or "q.weight" == name):
                     trainable = True
 
             param.requires_grad = trainable

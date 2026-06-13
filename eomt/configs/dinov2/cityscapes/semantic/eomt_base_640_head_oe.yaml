@@ -32,4 +32,4 @@ data:
     batch_size: 2
     img_size: [1024,1024]
     num_workers: 4
-    p_ood: 0.1
+    prob_oe: 0.1
