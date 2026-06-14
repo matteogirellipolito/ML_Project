@@ -10,7 +10,8 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
         self,
         lora_mode="standard",
         lora_rank=8,
-        lora_alpha=16,
+        lora_alpha=8,
+        target_blocks=(9,10,11),
         **kwargs
     ):
 
@@ -19,7 +20,7 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
         self.lora_mode = lora_mode
         self.lora_rank = lora_rank
         self.lora_alpha = lora_alpha
-
+        self.target_blocks = target_blocks
         self.inject_lora()
         self.freeze_except_lora()
         self.print_trainable_parameters()
@@ -36,7 +37,11 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
         LoRAClass = self.get_lora_class()
         num_injected = 0
 
-        for block in self.network.encoder.backbone.blocks:
+        blocks = self.network.encoder.backbone.blocks
+
+        for idx, block in enumerate(blocks):
+            if idx not in self.target_blocks:
+                continue
 
             block.attn.qkv = LoRAClass(
                 block.attn.qkv,
@@ -52,6 +57,7 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
 
             num_injected += 2
 
+            print(f"LoRA injected into block {idx}")
         print(f"Injected LoRA into {num_injected} layers")
 
     def freeze_except_lora(self):
