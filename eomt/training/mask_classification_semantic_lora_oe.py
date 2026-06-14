@@ -1,0 +1,81 @@
+import torch
+
+from training.mask_classification_semantic_oe import MaskClassificationSemanticOE
+
+from training.lora import LoRALinear
+
+
+class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
+    def __init__(
+        self,
+        lora_mode="standard",
+        lora_rank=8,
+        lora_alpha=16,
+        **kwargs
+    ):
+
+        super().__init__(**kwargs)
+
+        self.lora_mode = lora_mode
+        self.lora_rank = lora_rank
+        self.lora_alpha = lora_alpha
+
+        self.inject_lora()
+        self.freeze_except_lora()
+        self.print_trainable_parameters()
+
+    def get_lora_class(self):
+
+        if self.lora_mode == "standard":
+            return LoRALinear
+
+        raise ValueError(f"Unknown lora_mode: {self.lora_mode}")
+
+    def inject_lora(self):
+
+        LoRAClass = self.get_lora_class()
+        num_injected = 0
+
+        for block in self.network.encoder.backbone.blocks:
+
+            block.attn.qkv = LoRAClass(
+                block.attn.qkv,
+                rank=self.lora_rank,
+                alpha=self.lora_alpha,
+            )
+
+            block.attn.proj = LoRAClass(
+                block.attn.proj,
+                rank=self.lora_rank,
+                alpha=self.lora_alpha,
+            )
+
+            num_injected += 2
+
+        print(f"Injected LoRA into {num_injected} layers")
+
+    def freeze_except_lora(self):
+        for param in self.network.parameters():
+            param.requires_grad = False
+
+        for name, param in self.network.named_parameters():
+            if (".A" in name or ".B" in name):
+                param.requires_grad = True
+
+    def print_trainable_parameters(self):
+        trainable = 0
+        total = 0
+
+        for param in self.network.parameters():
+            n = param.numel()
+            total += n
+
+            if param.requires_grad:
+                trainable += n
+
+        percent = 100.0 * trainable / total
+
+        print("\n LoRA Params:")
+        print(f"TRAINABLE: {trainable}")
+        print(f"TOTAL: {total}")
+        print(f"PERCENT: {percent:.4f}%")
