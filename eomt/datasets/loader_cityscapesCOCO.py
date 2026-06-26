@@ -51,7 +51,9 @@ class CityscapesCOCO(Dataset):
             size=sem_img.shape[-2:],
             mode="nearest"
         )[0,0].bool()
-
+        print("Semantic:", sem_img.shape)
+        print("Contaminated:", contam.shape)
+        print("Anomaly:", anomaly.shape)
         target["anomaly_mask"] = tv_tensors.Mask(anomaly)
 
         if "masks" in target and target["masks"].numel() > 0:
