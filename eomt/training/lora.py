@@ -7,7 +7,7 @@ class LoRALinear(nn.Module):
         self,
         linear: nn.Linear,
         rank: int = 8,
-        alpha: float = 16.0,
+        alpha: float = 16,
     ):
         super().__init__()
         self.linear = linear

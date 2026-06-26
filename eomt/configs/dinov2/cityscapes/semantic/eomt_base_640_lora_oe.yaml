@@ -1,5 +1,5 @@
 trainer:
-  max_epochs: 3
+  max_epochs: 4
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
@@ -10,7 +10,7 @@ model:
   init_args:
     lora_mode: standard
     lora_rank: 8
-    lora_alpha: 8
+    lora_alpha: 16
     target_blocks: [9,10,11]
     lambda_rba: 0.1
     rba_alpha: 5.0

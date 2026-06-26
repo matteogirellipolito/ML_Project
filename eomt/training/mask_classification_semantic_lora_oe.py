@@ -10,7 +10,7 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
         self,
         lora_mode="standard",
         lora_rank=8,
-        lora_alpha=8,
+        lora_alpha=16,
         target_blocks=(9,10,11),
         **kwargs
     ):
