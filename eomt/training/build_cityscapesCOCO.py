@@ -41,10 +41,7 @@ def build_dataset(
     
     for idx in tqdm(range(len(dataset))):
             
-        img_tensor, target = dataset[idx]    
-        if idx == 0:
-            print(img_tensor.min().item(), img_tensor.max().item(), img_tensor.dtype) 
-         
+        img_tensor, target = dataset[idx]          
         img = img_tensor.cpu()
         if img.max() <= 1.0:
             img = (img * 255).byte()
