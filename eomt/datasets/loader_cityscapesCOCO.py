@@ -37,21 +37,24 @@ class CityscapesCOCO(Dataset):
 
         contam = np.array(Image.open(self.images[idx]).convert("RGB"))
         contam = torch.from_numpy(contam).permute(2,0,1).float()
+        if contam.shape[-2:] != sem_img.shape[-2:]:
+            contam = torch.nn.functional.interpolate(
+                contam.unsqueeze(0),
+                size=sem_img.shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            )[0]
 
         anomaly = np.array(Image.open(self.masks[idx])) > 0
         anomaly = torch.tensor(anomaly, dtype=torch.float32)[None,None]
-        print("semantic", sem_img.shape)
-        print("contam", contam.shape)
-        print("anomaly raw", anomaly.shape)
         if anomaly.shape[-2:] != sem_img.shape[-2:]:
             anomaly = torch.nn.functional.interpolate(
                 anomaly,
                 size=sem_img.shape[-2:],
                 mode="nearest"
             )
-
         anomaly = anomaly[0,0].bool()
-        print("anomaly final", anomaly.shape)
+        
         target["anomaly_mask"] = tv_tensors.Mask(anomaly)
 
         if "masks" in target and target["masks"].numel() > 0:
