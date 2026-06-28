@@ -4,6 +4,9 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import gaussian_filter
 
+random.seed(42)
+np.random.seed(42)
+
 VALID_CATEGORIES = {
 
     # animals    
@@ -36,13 +39,13 @@ def rgb2id(color):
     )
 
 def contaminate_cityscapes_image(
-    city_path,
+    city_image,
     pano,
     coco_dir,
     pano_mask_dir
 ):
 
-    city=np.array(Image.open(city_path).convert("RGB"))
+    city = city_image.copy()
 
     ann=random.choice(pano["annotations"])
 
@@ -59,7 +62,10 @@ def contaminate_cityscapes_image(
 
     if len(valid)==0:
         return contaminate_cityscapes_image(
-            city_path,pano,coco_dir,pano_mask_dir
+            city,
+            pano,
+            coco_dir,   
+            pano_mask_dir,
         )
 
     seg=random.choice(valid)

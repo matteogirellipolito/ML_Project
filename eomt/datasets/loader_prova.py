@@ -5,10 +5,8 @@ import numpy as np
 from PIL import Image
 
 import torch
-import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torchvision import tv_tensors
-
 
 class CityscapesCOCO(Dataset):
 
@@ -49,24 +47,11 @@ class CityscapesCOCO(Dataset):
 
             return sem_img, target
 
-        contam = Image.open(self.images[idx]).convert("RGB")
-        contam = contam.resize((W, H), Image.BILINEAR)
+        contam = np.array(Image.open(self.images[idx]).convert("RGB"))
+        contam = torch.from_numpy(contam).permute(2,0,1).float()
 
-        contam = torch.from_numpy(
-            np.array(contam)
-        ).permute(2, 0, 1).float()
-
-        anomaly = Image.open(self.masks[idx])
-
-        anomaly = torch.from_numpy(
-            (np.array(anomaly) > 0).astype(np.float32)
-        )[None, None]
-
-        anomaly = F.interpolate(
-            anomaly,
-            size=(H, W),
-            mode="nearest",
-        )[0, 0].bool()
+        anomaly = np.array(Image.open(self.masks[idx])) > 0
+        anomaly = torch.from_numpy(anomaly)
 
         target["anomaly_mask"] = tv_tensors.Mask(anomaly)
   
