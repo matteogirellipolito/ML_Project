@@ -1,0 +1,45 @@
+# =============================================================================
+# VERSIONE SPERIMENTALE (Opzione B') - NON e' l'originale.
+# Differenze rispetto a eomt_base_640_head_oe.yaml:
+#   - data.class_path -> PROVA_cityscapes_semantic_oe
+#   - aggiunto gt_dir (cartella delle label map salvate dal nuovo build)
+#   - prob_oe ora ha effetto (forward corretto al loader)
+# Ricordati di valorizzare: path, contaminated_images, anomaly_masks, gt_dir
+# =============================================================================
+
+trainer:
+  max_epochs: 4
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: "ProgettoML"
+      name: "head_oe_RbA_PROVA_Bprime"
+model:
+  class_path: training.mask_classification_semantic_oe.MaskClassificationSemanticOE
+  init_args:
+    tuning_mode: "head"
+    lambda_rba: 0.1
+    rba_alpha: 5.0
+    attn_mask_annealing_enabled: True
+    attn_mask_annealing_start_steps: [3317,8292,13268]
+    attn_mask_annealing_end_steps: [6634,11609,16585]
+    network:
+      class_path: models.eomt.EoMT
+      init_args:
+        num_q: 100
+        num_blocks: 3
+        encoder:
+          class_path: models.vit.ViT
+          init_args:
+            backbone_name: vit_base_patch14_reg4_dinov2
+data:
+  class_path: datasets.PROVA_cityscapes_semantic_oe.CityscapesSemanticOE
+  init_args:
+    path: null
+    contaminated_images: null
+    anomaly_masks: null
+    gt_dir: null
+    batch_size: 2
+    img_size: [1024,1024]
+    num_workers: 4
+    prob_oe: 0.1
