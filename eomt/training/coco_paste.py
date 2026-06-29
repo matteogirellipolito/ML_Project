@@ -97,37 +97,39 @@ def contaminate_cityscapes_image(
 
     H,W=city.shape[:2]
 
-    scale=np.random.uniform(
-        0.15,
-        0.30
-    )*H/max(obj.shape[:2])
+    MIN_SCALE = 0.22
+    MAX_SCALE = 0.40
 
-    nh=int(obj.shape[0]*scale)
-    nw=int(obj.shape[1]*scale)
-
-    obj=np.array(
-        Image.fromarray(obj).resize(
-            (nw,nh)
-        )
+    scale = min(    
+        np.random.uniform(MIN_SCALE, MAX_SCALE) * H / obj.shape[0],
+        np.random.uniform(MIN_SCALE, MAX_SCALE) * W / obj.shape[1]
     )
 
-    mask=np.array(
-        Image.fromarray(
-            mask.astype(np.uint8)*255
-        ).resize(
-            (nw,nh)
-        )
-    )>0
+    nh = max(1, int(obj.shape[0] * scale))
+    nw = max(1, int(obj.shape[1] * scale))
 
-    px=random.randint(
-        W//3,
-        W-nw-1
-    )
+    obj = np.array(Image.fromarray(obj).resize((nw, nh)))
 
-    py=random.randint(
-        H//2,
-        H-nh-1
-    )
+    mask = np.array(Image.fromarray((mask.astype(np.uint8) * 255)).resize((nw, nh))) > 0
+
+    MARGIN = 10
+
+    xmin = 0
+    ymin = H // 2
+
+    xmax = W - nw - MARGIN
+    ymax = H - nh - MARGIN
+
+    if xmax < xmin:
+        xmin = 0
+        xmax = W - nw
+
+    if ymax < ymin:
+        ymin = 0
+        ymax = H - nh
+
+    px = random.randint(xmin, xmax)
+    py = random.randint(ymin, ymax)
 
     result=city.copy()
 
