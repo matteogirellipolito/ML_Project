@@ -81,7 +81,11 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
 
         percent = 100.0 * trainable / total
 
-        print("\n LoRA Params:")
-        print(f"TRAINABLE: {trainable}")
-        print(f"TOTAL: {total}")
-        print(f"PERCENT: {percent:.4f}%")
+        print("\nLoRA")
+        print(f"Mode          : {self.lora_mode}")
+        print(f"Rank          : {self.lora_rank}")
+        print(f"Alpha         : {self.lora_alpha}")
+        print(f"Target blocks : {self.target_blocks}")
+        print(f"Trainable     : {trainable:,}")
+        print(f"Total         : {total:,}")
+        print(f"Percentage    : {percent:.4f}%")  
