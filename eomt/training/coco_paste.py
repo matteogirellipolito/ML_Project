@@ -107,11 +107,15 @@ def contaminate_cityscapes_image(
 
     nh = max(1, int(obj.shape[0] * scale))
     nw = max(1, int(obj.shape[1] * scale))
+    nh = min(nh, H - 20)
+    nw = min(nw, W - 20)
 
-    obj = np.array(Image.fromarray(obj).resize((nw, nh)))
+    obj = np.array(Image.fromarray(obj).resize((nw,nh), Image.Resampling.BILINEAR))
 
-    mask = np.array(Image.fromarray((mask.astype(np.uint8) * 255)).resize((nw, nh))) > 0
-
+    mask = np.array(Image.fromarray(mask.astype(np.uint8)*255).resize((nw,nh), Image.Resampling.NEAREST))>0
+ 
+    assert obj.shape[:2] == mask.shape
+ 
     MARGIN = 10
 
     xmin = 0
@@ -135,9 +139,9 @@ def contaminate_cityscapes_image(
 
     soft=gaussian_filter(
         mask.astype(float),
-        sigma=1
+        sigma=2.5
     )
-
+ 
     alpha=soft[...,None]
 
     reg=result[
