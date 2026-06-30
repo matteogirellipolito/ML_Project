@@ -4,7 +4,7 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: "ProgettoML"
-      name: "query_oe_RbA"
+      name: "LoRA"
 model:
   class_path: training.mask_classification_semantic_lora_oe.MaskClassificationSemanticLoRAOE
   init_args:

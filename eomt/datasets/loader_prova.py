@@ -69,11 +69,7 @@ class CityscapesCOCO(Dataset):
         target["anomaly_mask"] = tv_tensors.Mask(anomaly)
         
         if target["masks"].numel() > 0:
-            print("idx:", idx)
-            print("sem_img:", sem_img.shape)
-            print("contam:", contam.shape)
-            print("anomaly:", anomaly.shape)
-            print("target masks:", target["masks"].shape)
+
             visible_masks = target["masks"].bool() & (~anomaly)
 
             valid = visible_masks.flatten(1).any(dim=1)

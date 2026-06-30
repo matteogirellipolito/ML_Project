@@ -3,7 +3,8 @@ import torch
 from training.mask_classification_semantic_oe import MaskClassificationSemanticOE
 
 from training.lora import LoRALinear
-
+from training.selective_lora import SelectiveLoRALinear
+from training.ada_lora import AdaLoRALinear
 
 class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
     def __init__(
@@ -29,6 +30,12 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
 
         if self.lora_mode == "standard":
             return LoRALinear
+
+        elif self.lora_mode == "selective":
+            return SelectiveLoRALinear
+
+        elif self.lora_mode == "adalora":
+            return AdaLoRALinear
 
         raise ValueError(f"Unknown lora_mode: {self.lora_mode}")
 
@@ -64,9 +71,10 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
         for param in self.network.parameters():
             param.requires_grad = False
 
-        for name, param in self.network.named_parameters():
-            if (".A" in name or ".B" in name):
-                param.requires_grad = True
+        for module in self.network.modules():
+            if isinstance(module, (LoRALinear, SelectiveLoRALinear, AdaLoRALinear)):
+                for param in module.parameters():
+                    param.requires_grad = True
 
     def print_trainable_parameters(self):
         trainable = 0
