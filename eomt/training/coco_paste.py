@@ -31,6 +31,7 @@ VALID_CATEGORIES = {
     72: "tv", 73: "laptop", 74: "mouse", 75: "remote", 76: "keyboard", 77: "cell phone"
 }
 
+# Converts the RGB panoptic encoding into the unique integer id used by the COCO panoptic annotations.
 def rgb2id(color):
     return (
         color[:,:,0].astype(np.int64)
@@ -38,6 +39,8 @@ def rgb2id(color):
         +256*256*color[:,:,2].astype(np.int64)
     )
 
+# Generates one contaminated Cityscapes image by selecting a random
+# COCO object instance and blending it into the driving scene
 def contaminate_cityscapes_image(
     city_image,
     pano,
@@ -50,7 +53,8 @@ def contaminate_cityscapes_image(
     ann=random.choice(pano["annotations"])
 
     valid=[]
-
+ 
+    # Keep only sufficiently large, non-crowd objects belonging to the selected categories
     for s in ann["segments_info"]:
 
         if (
@@ -59,7 +63,8 @@ def contaminate_cityscapes_image(
             and s["iscrowd"]==0
         ):
             valid.append(s)
-
+ 
+    # Retry with another COCO image if no valid object is available
     if len(valid)==0:
         return contaminate_cityscapes_image(
             city,
@@ -96,10 +101,12 @@ def contaminate_cityscapes_image(
     mask=inst_mask[y1:y2,x1:x2]
 
     H,W=city.shape[:2]
-
+    
+    # Resize the pasted object so that its size remains realistic with respect to the target Cityscapes scene
     MIN_SCALE = 0.22
     MAX_SCALE = 0.40
 
+    # Preserve aspect ratio while constraining the object size
     scale = min(    
         np.random.uniform(MIN_SCALE, MAX_SCALE) * H / obj.shape[0],
         np.random.uniform(MIN_SCALE, MAX_SCALE) * W / obj.shape[1]
@@ -115,7 +122,8 @@ def contaminate_cityscapes_image(
     mask = np.array(Image.fromarray(mask.astype(np.uint8)*255).resize((nw,nh), Image.Resampling.NEAREST))>0
  
     assert obj.shape[:2] == mask.shape
- 
+    
+    # Sample a random position in the lower half of the image, where road anomalies are more likely to appear
     MARGIN = 10
 
     xmin = 0
@@ -136,7 +144,8 @@ def contaminate_cityscapes_image(
     py = random.randint(ymin, ymax)
 
     result=city.copy()
-
+ 
+    # Smooth object boundaries to reduce visible copy-paste artifacts
     soft=gaussian_filter(
         mask.astype(float),
         sigma=2.5
@@ -160,7 +169,8 @@ def contaminate_cityscapes_image(
         py:py+nh,
         px:px+nw
     ]=reg
-
+ 
+    # Generate the binary anomaly mask corresponding to the pasted object.
     anomaly=np.zeros(
         (H,W),
         dtype=np.uint8

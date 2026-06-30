@@ -70,12 +70,29 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
     def freeze_except_lora(self):
         for param in self.network.parameters():
             param.requires_grad = False
-
+        """
         for module in self.network.modules():
             if isinstance(module, (LoRALinear, SelectiveLoRALinear, AdaLoRALinear)):
                 for param in module.parameters():
                     param.requires_grad = True
-
+        """
+ 
+        for module in self.network.modules():
+            if isinstance(module, LoRALinear):
+                module.A.requires_grad = True
+                module.B.requires_grad = True
+ 
+            if isinstance(module, SelectiveLoRALinear): 
+                module.A.requires_grad = True
+                module.B.requires_grad = True
+                module.gate.requires_grad = True
+ 
+            if isinstance(module, AdaLoRALinear):
+                module.A.requires_grad = True
+                module.B.requires_grad = True
+                module.rank_importance.requires_grad = True
+ 
+ 
     def print_trainable_parameters(self):
         trainable = 0
         total = 0
