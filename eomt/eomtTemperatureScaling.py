@@ -38,6 +38,7 @@ def main(args):
     config_path = 'configs/dinov2/cityscapes/semantic/eomt_base_640.yaml'
     config = yaml.safe_load(open(config_path))
 
+    # Build encoder and segmentation network from the configuration file
     encoder_cfg = config["model"]["init_args"]["network"]["init_args"]["encoder"]
     encoder_module_name, encoder_class_name = encoder_cfg["class_path"].rsplit(".", 1)
     encoder_cls = getattr(importlib.import_module(encoder_module_name), encoder_class_name)
@@ -49,6 +50,7 @@ def main(args):
     network_kwargs = {k: v for k, v in network_cfg["init_args"].items() if k != "encoder"}
     network = network_cls(masked_attn_enabled=False,num_classes=19,encoder=encoder,**network_kwargs)
 
+    # Instantiate the Lightning module
     lit_module_name, lit_class_name = config["model"]["class_path"].rsplit(".", 1)
     lit_cls = getattr(importlib.import_module(lit_module_name), lit_class_name)
     model_kwargs = {k: v for k, v in config["model"]["init_args"].items() if k != "network"}
@@ -66,6 +68,7 @@ def main(args):
 
     print('Model weights loaded succesfully')
 
+    # Store anomaly scores for each temperature
     results_per_temp = {}
 
     for temp in args.temperatures:
@@ -73,18 +76,21 @@ def main(args):
 
     image_paths = glob.glob(os.path.expanduser(str(args.input[0])))
 
+    # Process every image in the selected dataset
     for path in image_paths:
         print(path)
         image = Image.open(path).convert("RGB")
         image = input_transform(image)
         image = image.unsqueeze(0).float().to(device)
 
+        # Compute full-resolution semantic logits
         with torch.no_grad():
             image = image.squeeze(0)
             image = (image * 255).to(torch.uint8)
             image = [image.to(device)]
             img_sizes = [img.shape[-2:] for img in image]
-
+ 
+            # Use mixed-precision inference to reduce GPU memory consumption and improve execution speed
             with autocast(dtype=torch.float16, device_type="cuda"):
                 crops, origins = model.window_imgs_semantic(image)
                 mask_logits_per_layer, class_logits_per_layer = model(crops)
@@ -92,7 +98,8 @@ def main(args):
                 crop_logits = model.to_per_pixel_logits_semantic(mask_logits,class_logits_per_layer[-1])
                 logits = model.revert_window_logits_semantic(crop_logits,origins,img_sizes)
 
-        pathGT = path.replace("images","labels_masks")
+        # Load and convert the ground-truth anomaly mask
+        pathGT  = path.replace("images", "labels_masks")
 
         if "RoadObsticle21" in pathGT:
             pathGT = pathGT.replace("webp","png")
@@ -121,6 +128,8 @@ def main(args):
         ood_mask = (ood_gts == 1)
         ind_mask = (ood_gts == 0)
 
+        # Apply temperature scaling to the semantic logits before the softmax computation and
+        # evaluate the corresponding MSP anomaly score for each temperature value
         for temp in args.temperatures:
             scaled_logits = logits[0] / temp
             scaled_logits = scaled_logits.float()
@@ -128,11 +137,13 @@ def main(args):
             anomaly_result = msp_map.cpu().numpy()
             results_per_temp[temp]["ood"].append(anomaly_result[ood_mask])
             results_per_temp[temp]["ind"].append(anomaly_result[ind_mask])
-
+ 
+        # Deleting variables from memory and emptying cache for memory
         del logits, crop_logits, mask_logits, mask_logits_per_layer, class_logits_per_layer, anomaly_result, scaled_logits
         del ood_gts, mask, crops, origins, image
         torch.cuda.empty_cache()
 
+    # Compute OOD metrics for each temperature
     for temp in args.temperatures:
         ood_out = np.concatenate(results_per_temp[temp]["ood"])
         ind_out = np.concatenate(results_per_temp[temp]["ind"])

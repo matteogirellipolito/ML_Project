@@ -49,6 +49,7 @@ def main(args):
     config_path = args.config
     config = yaml.safe_load(open(config_path))
 
+    # Build encoder and segmentation network from the configuration file
     encoder_cfg = config["model"]["init_args"]["network"]["init_args"]["encoder"]
     encoder_module_name, encoder_class_name = encoder_cfg["class_path"].rsplit(".", 1)
     encoder_cls = getattr(importlib.import_module(encoder_module_name), encoder_class_name)
@@ -60,6 +61,7 @@ def main(args):
     network_kwargs = {k: v for k, v in network_cfg["init_args"].items() if k != "encoder"}
     network = network_cls(masked_attn_enabled=False,num_classes=19,encoder=encoder,**network_kwargs)
 
+    # Instantiate the Lightning module
     lit_module_name, lit_class_name = config["model"]["class_path"].rsplit(".", 1)
     lit_cls = getattr(importlib.import_module(lit_module_name), lit_class_name)
     model_kwargs = {k: v for k, v in config["model"]["init_args"].items() if k != "network"}
@@ -73,7 +75,7 @@ def main(args):
     else:
         ckpt = torch.load(args.checkpoint, map_location=device)
 
-    # supporta sia Lightning ckpt sia state_dict puro
+    # Support both Lightning checkpoints and raw state_dict checkpoints
     if isinstance(ckpt, dict) and "state_dict" in ckpt:
         print("Lightning checkpoint detected")
         state_dict = ckpt["state_dict"]
@@ -96,6 +98,7 @@ def main(args):
 
     model.eval()
 
+    # Create Cityscapes validation dataset and dataloader
     dataset = cityscapes(args.datadir,input_transform,target_transform,subset=args.subset)
 
     loader = DataLoader(dataset,num_workers=args.num_workers,batch_size=args.batch_size,shuffle=False)
@@ -103,16 +106,19 @@ def main(args):
     iouEvalVal = iouEval(NUM_CLASSES)
 
     start = time.time()
-
+ 
+    # Evaluate the model on the selected subset
     for step, (image, labels, filename,filenameGt) in enumerate(loader):
         image = image.to(device)
         labels = labels.long().to(device)
 
+        # Compute full-resolution semantic logits
         with torch.no_grad():
             image = image.squeeze(0)
             image = [(image * 255).to(torch.uint8)]
             img_sizes = [img.shape[-2:] for img in image]
-
+ 
+            # Use mixed-precision inference to reduce GPU memory consumption and improve execution speed
             with autocast(dtype=torch.float16, device_type="cuda"):
                 crops, origins = model.window_imgs_semantic(image)
                 mask_logits_per_layer, class_logits_per_layer = model(crops)
@@ -120,8 +126,9 @@ def main(args):
                 crop_logits = model.to_per_pixel_logits_semantic(mask_logits, class_logits_per_layer[-1])
                 logits = model.revert_window_logits_semantic(crop_logits, origins, img_sizes)
 
+        # Pixel-wise semantic prediction
         prediction = logits[0].max(0)[1].unsqueeze(0).unsqueeze(0)
-
+        # Update IoU statistics
         iouEvalVal.addBatch(prediction, labels)
 
         filenameSave = filename[0].split("leftImg8bit/")[-1]
