@@ -7,7 +7,7 @@
 # =============================================================================
 
 from datasets.cityscapes_semantic import CityscapesSemantic
-from datasets.PROVA_loader_prova import CityscapesCOCO
+from eomt.datasets.loader_cityscapesCOCO import CityscapesCOCO
 
 
 class CityscapesSemanticOE(CityscapesSemantic):
