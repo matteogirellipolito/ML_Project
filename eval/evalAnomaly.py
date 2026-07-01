@@ -12,7 +12,7 @@ from argparse import ArgumentParser
 from ood_metrics import fpr_at_95_tpr, calc_metrics, plot_roc, plot_pr,plot_barcode
 from sklearn.metrics import roc_auc_score, roc_curve, auc, precision_recall_curve, average_precision_score
 from torchvision.transforms import Compose, Resize, ToTensor, Normalize
-
+from scipy.special import softmax
 seed = 42
 
 # general reproducibility
@@ -100,7 +100,9 @@ def main():
         #images = images.permute(0,3,1,2)
         with torch.no_grad():
             result = model(images)
-        anomaly_result = 1.0 - np.max(result.squeeze(0).data.cpu().numpy(), axis=0)            
+        logits = result.squeeze(0).data.cpu().numpy()
+        probs = softmax(logits, axis=0)
+        anomaly_result = 1.0 - np.max(probs, axis=0)            #MSP= 1 - max softmax probability
         pathGT = path.replace("images", "labels_masks")                
         if "RoadObsticle21" in pathGT:
            pathGT = pathGT.replace("webp", "png")
