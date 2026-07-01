@@ -6,6 +6,7 @@ from training.lora import LoRALinear
 from training.selective_lora import SelectiveLoRALinear
 from training.ada_lora import AdaLoRALinear
 
+# Extends the OE training pipeline with parameter-efficient LoRA fine-tuning
 class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
     def __init__(
         self,
@@ -39,17 +40,20 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
 
         raise ValueError(f"Unknown lora_mode: {self.lora_mode}")
 
+    # Replace the selected attention layers with their LoRA counterparts
     def inject_lora(self):
 
+        # Instantiate the requested LoRA variant
         LoRAClass = self.get_lora_class()
         num_injected = 0
-
+        # Inject LoRA only into the specified transformer blocks
         blocks = self.network.encoder.backbone.blocks
 
         for idx, block in enumerate(blocks):
             if idx not in self.target_blocks:
                 continue
-
+ 
+            # Apply LoRA to both the QKV projection and the output projection        
             block.attn.qkv = LoRAClass(
                 block.attn.qkv,
                 rank=self.lora_rank,
@@ -66,17 +70,13 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
 
             print(f"LoRA injected into block {idx}")
         print(f"Injected LoRA into {num_injected} layers")
-
+ 
+    # Freeze the backbone and optimize only the LoRA adapters
     def freeze_except_lora(self):
         for param in self.network.parameters():
             param.requires_grad = False
-        """
-        for module in self.network.modules():
-            if isinstance(module, (LoRALinear, SelectiveLoRALinear, AdaLoRALinear)):
-                for param in module.parameters():
-                    param.requires_grad = True
-        """
- 
+        
+        # Re-enable gradients for all supported LoRA variants
         for module in self.network.modules():
             if isinstance(module, LoRALinear):
                 module.A.requires_grad = True
@@ -91,7 +91,6 @@ class MaskClassificationSemanticLoRAOE(MaskClassificationSemanticOE):
                 module.A.requires_grad = True
                 module.B.requires_grad = True
                 module.rank_importance.requires_grad = True
- 
  
     def print_trainable_parameters(self):
         trainable = 0
