@@ -1,13 +1,6 @@
-"""LightningDataModule for Cityscapes semantic segmentation with Outlier
-Exposure (OE).
+#LightningDataModule for Cityscapes semantic segmentation with Outlier Exposure
 
-It extends the plain Cityscapes semantic data module: after the usual setup, the
-training dataset is wrapped in ``CityscapesCOCO``, which mixes clean images with
-contaminated ones (a COCO object pasted onto the road as a synthetic anomaly).
-The three extra paths point to the pre-built OE dataset, and ``prob_oe`` controls
-the fraction of training samples that are contaminated. Validation is left
-unchanged (clean Cityscapes), so standard mIoU evaluation still applies.
-"""
+#training dataset is wrapped in CityscapesCOCO which mixes clean images with contaminated ones
 
 from datasets.cityscapes_semantic import CityscapesSemantic
 from datasets.loader_cityscapesCOCO import CityscapesCOCO
@@ -26,21 +19,18 @@ class CityscapesSemanticOE(CityscapesSemantic):
     ):
         super().__init__(**kwargs)
 
-        # Store the OE-specific paths and probability; they are only consumed
-        # later, in setup(), when the training dataset is built.
+        # Store the OE-specific paths and probability, they are only consumed later, in setup(), when the training dataset is built.
         self.contaminated_images = contaminated_images
         self.anomaly_masks = anomaly_masks
         self.gt_dir = gt_dir
         self.prob_oe = prob_oe
 
     def setup(self, stage=None):
-        # First build the standard Cityscapes train/val datasets.
+        # 1) build the standard Cityscapes train/val datasets
         super().setup(stage)
 
-        # Then replace the training set with the OE wrapper: it keeps the clean
-        # samples and, with probability `prob_oe`, serves a contaminated triplet
-        # (image + anomaly mask + label map) instead. The clean semantic dataset
-        # is passed in so the wrapper can reuse its images and augmentation.
+        #  2)replace the training set with the OE wrapper
+        # keeps normal samples and with prob_oe gives a contaminated triplet (image + anomaly mask + label map)
         self.cityscapes_train_dataset = CityscapesCOCO(
             image_dir=self.contaminated_images,
             anomaly_dir=self.anomaly_masks,
