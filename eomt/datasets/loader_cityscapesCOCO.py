@@ -24,15 +24,14 @@ class CityscapesCOCO(Dataset):
 
     def __init__(
         self,
-        image_dir,          # folder with the pre-built contaminated images
-        anomaly_dir,        # folder with the matching anomaly masks
-        gt_dir,             # folder with the matching semantic label maps
-        semantic_dataset,   # underlying clean Cityscapes dataset (with transforms)
-        prob_oe=0.1,        # probability of returning a contaminated sample
+        image_dir,          # contaminated images
+        anomaly_dir,        # anomaly masks
+        gt_dir,             # semantic label maps
+        semantic_dataset,   # clean Cityscapes dataset (with transforms)
+        prob_oe=0.1,        
     ):
 
-        # Index every triplet element by file name, so a Cityscapes sample can
-        # be matched to its contaminated counterpart regardless of ordering
+        # Index triplet by file name
         self.contam_by_name = {p.name: p for p in Path(image_dir).rglob("*.png")}
         self.anomaly_by_name = {p.name: p for p in Path(anomaly_dir).rglob("*.png")}
         self.gt_by_name = {p.name: p for p in Path(gt_dir).rglob("*.png")}
@@ -40,9 +39,7 @@ class CityscapesCOCO(Dataset):
         self.semantic_dataset = semantic_dataset
         self.prob_oe = prob_oe
 
-        # Reuse the SAME augmentation object as the clean dataset: the clean
-        # branch applies it internally, the OE branch applies it explicitly, so
-        # both branches share identical augmentation behaviour
+        # Reuse SAME augmentation object as the clean dataset
         self.transforms = semantic_dataset.transforms
         self.target_parser = CityscapesSemantic.target_parser
 
@@ -59,7 +56,6 @@ class CityscapesCOCO(Dataset):
         name = Path(self.semantic_dataset.imgs[idx]).name
 
         #  CLEAN branch (probability 1 - prob_oe) 
-        # Also taken if no contaminated image exists for this file name
         if random.random() > self.prob_oe or name not in self.contam_by_name:
             sem_img, target = self.semantic_dataset[idx]
             H, W = sem_img.shape[-2:]
@@ -68,25 +64,24 @@ class CityscapesCOCO(Dataset):
             )
             return sem_img, target
 
-        #  OE branch: raw triplet + one shared transform 
-        # 1) contaminated image, kept as uint8 like the clean dataset
+        #  OE--> raw triplet + one shared transform
+        
+        # 1) contaminated image
         contam = np.array(Image.open(self.contam_by_name[name]).convert("RGB"))
         contam = tv_tensors.Image(
             torch.from_numpy(contam).permute(2, 0, 1).contiguous()
         )
 
-        # 2) anomaly mask as a boolean [H, W] tensor
+        # 2) anomaly mask --> boolean [H, W] tensor
         anomaly = np.array(Image.open(self.anomaly_by_name[name])) > 0
         anomaly = torch.from_numpy(anomaly).bool()
 
-        # 3) label map [1, H, W] -> per-class masks/labels via the shared parser
+        # 3) label map [1, H, W] -> per-class masks/labels
         gt = np.array(Image.open(self.gt_by_name[name]))
         gt = tv_tensors.Mask(torch.from_numpy(gt.astype("int64"))[None])
         masks, labels, is_crowd = self.target_parser(target=gt)
 
-        # Append the anomaly as an extra mask row so it rides through the SAME
-        # transform as the semantic masks. is_anomaly marks which row it is;
-        # labels/is_crowd get dummy entries to keep all arrays the same length
+        # Append the anomaly as an extra mask row for SAME transform as semantic masks
         masks = tv_tensors.Mask(torch.stack(masks + [anomaly]))
         labels = torch.tensor(labels + [0], dtype=torch.long)
         is_crowd = torch.tensor(is_crowd + [False], dtype=torch.bool)
@@ -116,8 +111,8 @@ class CityscapesCOCO(Dataset):
         labels = target["labels"][keep]
         is_crowd = target["is_crowd"][keep]
 
-        # Remove the anomalous region from the semantic supervision, then drop
-        # any mask that became empty as a result
+        # Remove the anomalous region from the semantic supervisio 
+        # drop any mask that became empty as a result
         if masks.numel() > 0:
             visible = masks & (~anomaly)
             valid = visible.flatten(1).any(dim=1)
